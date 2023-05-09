@@ -1,6 +1,11 @@
 package integration
 
 import base.IntegrationSpecBase
+import cats.data.NonEmptyList
+import cats.effect.IO
+import cats.effect.unsafe.implicits.global
+import io.github.embeddedkafka.Codecs.{stringDeserializer, stringSerializer}
+import uk.sky.fs2.kafka.topicloader.{LoadAll, TopicLoader}
 
 class TopicLoaderIntSpec extends IntegrationSpecBase {
 
@@ -8,12 +13,40 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
 
     "using LoadAll strategy" should {
 
-      "stream all records from all topics" in {
-        pending
+      val strategy = LoadAll
+
+      "stream all records from all topics" in new TestContext {
+        val topics                 = NonEmptyList.of(testTopic1, testTopic2)
+        val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
+
+        withRunningKafka {
+          createCustomTopics(topics)
+
+          publishToKafka(testTopic1, forTopic1)
+          publishToKafka(testTopic2, forTopic2)
+
+          val loadedRecords =
+            TopicLoader.load[IO, String, String](topics, strategy, consumerSettings).compile.toList.unsafeRunSync()
+
+          loadedRecords.map(recordToTuple) should contain theSameElementsAs (forTopic1 ++ forTopic2)
+        }
+
       }
 
-      "stream available records even when one topic is empty" in {
-        pending
+      "stream available records even when one topic is empty" in new TestContext {
+        val topics    = NonEmptyList.of(testTopic1, testTopic2)
+        val published = records(1 to 15)
+
+        withRunningKafka {
+          createCustomTopics(topics)
+
+          publishToKafka(testTopic1, published)
+
+          val loadedRecords =
+            TopicLoader.load[IO, String, String](topics, strategy, consumerSettings).compile.toList.unsafeRunSync()
+
+          loadedRecords.map(recordToTuple) should contain theSameElementsAs published
+        }
       }
 
     }

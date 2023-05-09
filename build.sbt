@@ -21,7 +21,16 @@ tpolecatScalacOptions ++= Set(ScalacOptions.source3)
 lazy val root = (project in file("."))
   .settings(
     name := "fs2-kafka-topic-loader",
-    libraryDependencies ++= Seq(Cats.core, Cats.effect, Fs2.core, Fs2.kafka, scalaTest)
+    libraryDependencies ++= Seq(
+      Cats.core,
+      Cats.effect,
+      Fs2.core,
+      Fs2.kafka,
+      embeddedKafka,
+      scalaTest,
+      scalaLogging,
+      logbackClassic
+    )
   )
 
 /** Scala 3 doesn't support two rules yet - RemoveUnused and ProcedureSyntax. So we require a different scalafix config
