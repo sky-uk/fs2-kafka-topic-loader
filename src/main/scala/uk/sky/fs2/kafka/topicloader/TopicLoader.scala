@@ -70,7 +70,7 @@ trait TopicLoader extends LazyLogging {
         beginningOffsets: Map[TopicPartition, Long]
     ): F[Map[TopicPartition, Long]] =
       beginningOffsets.toList.traverse { case (p, o) =>
-        println(s"Partitions: ${p}")
+        println(s"Partition: ${p}")
         println(s"Offsets: ${o}")
         val committed = consumer.committed(Set(p))
         println(s"committed: $committed")
@@ -87,10 +87,12 @@ trait TopicLoader extends LazyLogging {
       partitionInfo    <- topics.toList.flatTraverse(foo => consumer.partitionsFor(foo))
       partitions        = partitionInfo.map(pi => new TopicPartition(pi.topic, pi.partition)).toSet
       beginningOffsets <- consumer.beginningOffsets(partitions)
+      _                 = println(s"beginningOffsets: $beginningOffsets")
       endOffsets       <- strategy match {
                             case LoadAll       => consumer.endOffsets(partitions)
                             case LoadCommitted => earliestOffsets(consumer, beginningOffsets)
                           }
+      _                 = println(s"endOffsets: $endOffsets")
       logOffsets        = beginningOffsets.map { case (k, v) => k -> LogOffsets(v, endOffsets(k)) }
     } yield logOffsets.filter { case (_, o) => o.highest > o.lowest }
   }

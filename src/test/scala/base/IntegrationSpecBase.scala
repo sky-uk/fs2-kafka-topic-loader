@@ -1,9 +1,11 @@
 package base
 
 import cats.data.NonEmptyList
-import cats.effect.IO
-import fs2.kafka.{AutoOffsetReset, ConsumerRecord, ConsumerSettings}
+import cats.effect.{Async, IO, Resource}
+import fs2.Stream
+import fs2.kafka.{AutoOffsetReset, ConsumerRecord, ConsumerSettings, KafkaConsumer}
 import io.github.embeddedkafka.{EmbeddedKafka, EmbeddedKafkaConfig}
+import org.apache.kafka.clients.consumer.ConsumerConfig
 import utils.RandomPort
 
 import scala.concurrent.duration.*
@@ -33,6 +35,34 @@ abstract class IntegrationSpecBase extends UnitSpecBase {
     def records(r: Seq[Int]): Seq[(String, String)] = r.map(i => s"k$i" -> s"v$i")
 
     def recordToTuple[K, V](record: ConsumerRecord[K, V]): (K, V) = (record.key, record.value)
+  }
+
+  trait Consumer {
+    this: TestContext =>
+
+    def moveOffsetToEnd(topic: String): Stream[IO, KafkaConsumer[IO, Array[Byte], Array[Byte]]] =
+      KafkaConsumer
+        .stream(consumerSettings.withEnableAutoCommit(true))
+        .evalTap((consumer: KafkaConsumer[IO, Array[Byte], Array[Byte]]) =>
+          for {
+            _ <- consumer.subscribeTo(topic)
+            _ <- consumer.seekToEnd
+          } yield () // TODO - make this consume one record then stop
+        )
+
+    def createConsumer[F[_] : Async](
+        autoCommit: Boolean,
+        offsetReset: String,
+        groupId: Option[String]
+    ): Resource[F, KafkaConsumer[F, String, String]] = {
+      val baseSettings =
+        ConsumerSettings[F, String, String]
+          .withProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, autoCommit.toString)
+          .withProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, offsetReset)
+
+      val settings = groupId.fold(baseSettings)(baseSettings.withGroupId)
+      KafkaConsumer[F].resource(settings)
+    }
   }
 
 }

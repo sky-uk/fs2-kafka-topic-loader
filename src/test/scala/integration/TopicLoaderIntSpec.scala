@@ -5,7 +5,7 @@ import cats.data.NonEmptyList
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import io.github.embeddedkafka.Codecs.{stringDeserializer, stringSerializer}
-import uk.sky.fs2.kafka.topicloader.{LoadAll, TopicLoader}
+import uk.sky.fs2.kafka.topicloader.{LoadAll, LoadCommitted, TopicLoader}
 
 class TopicLoaderIntSpec extends IntegrationSpecBase {
 
@@ -53,8 +53,27 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
 
     "using LoadCommitted strategy" should {
 
-      "stream all records up to the committed offset with LoadCommitted strategy" in {
-        pending
+      val strategy = LoadCommitted
+
+      "stream all records up to the committed offset with LoadCommitted strategy" in new TestContext with Consumer {
+        val topics                    = NonEmptyList.one(testTopic1)
+        val (committed, notCommitted) = records(1 to 15).splitAt(10)
+
+        withRunningKafka {
+          createCustomTopics(topics)
+
+          val loaded = for {
+            _      <- IO.unit
+            _       = publishToKafka(testTopic1, committed)
+            _      <- moveOffsetToEnd(testTopic1).compile.drain
+            _       = publishToKafka(testTopic1, notCommitted)
+            loaded <-
+              TopicLoader.load[IO, String, String](topics, strategy, consumerSettings).compile.toList
+          } yield loaded
+
+          loaded.unsafeRunSync().map(recordToTuple) should contain theSameElementsAs committed
+        }
+
       }
 
       "stream available records even when one topic is empty" in {
