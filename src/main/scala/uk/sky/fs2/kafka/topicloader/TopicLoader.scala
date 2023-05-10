@@ -45,36 +45,39 @@ trait TopicLoader extends LazyLogging {
       .stream(consumerSettings)
       .evalMap { consumer: KafkaConsumer[F, Array[Byte], Array[Byte]] =>
         for {
-          logOffsets <- logOffsetsForTopics(topics, strategy, consumer)
-//          _             <- topics.toList.traverse(consumer.assign)
-//          assignment    <- consumer.assignment
-//          _                 = println(s"After Assignment: $assignment")
-//          beginningOffsets <- consumer.beginningOffsets(logOffsets.keySet)
-//          _                 = println(s"Before Assignment: $beginningOffsets")
-          partitions  = NonEmptySet.fromSet(SortedSet.from(logOffsets.keySet))
-          _          <- partitions match {
-                          case Some(value) => consumer.assign(value)
-                          case None        => ???
-                        }
-          _          <- logOffsets.toList.traverse { case (tp, o) => consumer.seek(tp, o.lowest) }
-//          _          <- consumer.seekToBeginning
-        } yield {
+          logOffsets     <- logOffsetsForTopics(topics, strategy, consumer)
+          maybePartitions = NonEmptySet.fromSet(SortedSet.from(logOffsets.keySet))
+          stream         <- maybePartitions match {
+                              case Some(partitions) =>
+                                val ret1: F[Stream[F, ConsumerRecord[K, V]]] = for {
+                                  _ <- consumer.assign(partitions)
+                                  _ <- logOffsets.toList.traverse { case (tp, o) => consumer.seek(tp, o.lowest) }
+                                } yield {
 
-          val allHighestOffsets: HighestOffsetsWithRecord[K, V] =
-            HighestOffsetsWithRecord[K, V](logOffsets.map { case (p, o) => p -> (o.highest - 1) })
+                                  val allHighestOffsets: HighestOffsetsWithRecord[K, V] =
+                                    HighestOffsetsWithRecord[K, V](logOffsets.map { case (p, o) => p -> (o.highest - 1) })
 
-          println(s"allHighestOffsets: $allHighestOffsets")
+                                  println(s"allHighestOffsets: $allHighestOffsets")
 
-          val filterBelowHighestOffset: Pipe[F, ConsumerRecord[K, V], ConsumerRecord[K, V]] =
-            _.scan(allHighestOffsets)(emitRecordRemovingConsumedPartition)
-              .takeWhile(_.partitionOffsets.nonEmpty, takeFailure = true)
-              .collect { case WithRecord(r) => r }
+                                  val filterBelowHighestOffset: Pipe[F, ConsumerRecord[K, V], ConsumerRecord[K, V]] =
+                                    _.scan(allHighestOffsets)(emitRecordRemovingConsumedPartition)
+                                      .takeWhile(_.partitionOffsets.nonEmpty, takeFailure = true)
+                                      .collect { case WithRecord(r) => r }
 
-          consumer.records
-            .map(cr => cr.bimap(_.deserialize[K](cr.record.topic), _.deserialize[V](cr.record.topic)).record)
-            .debug()
-            .through(filterBelowHighestOffset)
-        }
+                                  consumer.records
+                                    .map(cr =>
+                                      cr.bimap(_.deserialize[K](cr.record.topic), _.deserialize[V](cr.record.topic)).record
+                                    )
+                                    .debug()
+                                    .through(filterBelowHighestOffset)
+                                }
+                                ret1
+                              case None             =>
+                                val ret2: F[Stream[F, ConsumerRecord[K, V]]] =
+                                  Async[F].pure(Stream.emits(List.empty[ConsumerRecord[K, V]]))
+                                ret2
+                            }
+        } yield stream
       }
       .flatten
 
