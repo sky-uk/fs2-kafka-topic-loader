@@ -2,7 +2,6 @@ package base
 
 import cats.data.NonEmptyList
 import cats.effect.{Async, IO, Resource}
-import fs2.Stream
 import fs2.kafka.{AutoOffsetReset, ConsumerRecord, ConsumerSettings, KafkaConsumer}
 import io.github.embeddedkafka.{EmbeddedKafka, EmbeddedKafkaConfig}
 import org.apache.kafka.clients.consumer.ConsumerConfig
@@ -40,15 +39,18 @@ abstract class IntegrationSpecBase extends UnitSpecBase {
   trait Consumer {
     this: TestContext =>
 
-    def moveOffsetToEnd(topic: String): Stream[IO, KafkaConsumer[IO, Array[Byte], Array[Byte]]] =
+    def moveOffsetToEnd(topic: String) =
       KafkaConsumer
         .stream(consumerSettings.withEnableAutoCommit(true))
         .evalTap((consumer: KafkaConsumer[IO, Array[Byte], Array[Byte]]) =>
           for {
             _ <- consumer.subscribeTo(topic)
             _ <- consumer.seekToEnd
-          } yield () // TODO - make this consume one record then stop
+          } yield consumer // TODO - make this consume one record then stop
         )
+        .records
+        .take(1)
+        .drain
 
     def createConsumer[F[_] : Async](
         autoCommit: Boolean,

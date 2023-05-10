@@ -37,14 +37,27 @@ trait TopicLoader extends LazyLogging {
   ): Stream[F, ConsumerRecord[K, V]] =
     KafkaConsumer
       .stream(consumerSettings)
-      .evalMap { consumer =>
+      .evalMap { consumer: KafkaConsumer[F, Array[Byte], Array[Byte]] =>
         for {
-          logOffsets <- logOffsetsForTopics(topics, strategy, consumer)
-          _           = logger.warn(s"Subscribed to ${topics.mkString_(", ")}")
-          _          <- consumer.seekToBeginning
+          logOffsets    <- logOffsetsForTopics(topics, strategy, consumer)
+          _              = logger.warn(s"Subscribed to ${topics.mkString_(", ")}")
+//          _             <- consumer.subscribe(topics)
+          _             <- topics.toList.traverse(consumer.assign)
+//          assignment    <- consumer.assignment
+//          _                 = println(s"After Assignment: $assignment")
+//          beginningOffsets <- consumer.beginningOffsets(logOffsets.keySet)
+//          _                 = println(s"Before Assignment: $beginningOffsets")
+//          _                <- beginningOffsets.toList.traverse { case (tp, o) =>
+//                                consumer.seek(tp, o)
+//                              }
+          _             <- consumer.seekToBeginning
+          partitionInfo <- topics.toList.flatTraverse(consumer.partitionsFor)
+          partitions     = partitionInfo.map(pi => new TopicPartition(pi.topic, pi.partition))
         } yield {
           val allHighestOffsets: HighestOffsetsWithRecord[K, V] =
             HighestOffsetsWithRecord[K, V](logOffsets.map { case (p, o) => p -> (o.highest - 1) })
+
+          println(s"allHighestOffsets: $allHighestOffsets")
 
           val filterBelowHighestOffset: Pipe[F, ConsumerRecord[K, V], ConsumerRecord[K, V]] =
             _.scan(allHighestOffsets)(emitRecordRemovingConsumedPartition)
@@ -53,6 +66,7 @@ trait TopicLoader extends LazyLogging {
 
           consumer.records
             .map(cr => cr.bimap(_.deserialize[K](cr.record.topic), _.deserialize[V](cr.record.topic)).record)
+            .debug()
             .through(filterBelowHighestOffset)
         }
       }
@@ -83,8 +97,10 @@ trait TopicLoader extends LazyLogging {
       }.map(_.toMap)
 
     for {
-      _                <- consumer.subscribeTo(topics.head, topics.tail*)
-      partitionInfo    <- topics.toList.flatTraverse(foo => consumer.partitionsFor(foo))
+//      _                <- consumer.subscribe(topics)
+      _                <- topics.toList.traverse(consumer.assign)
+      _                 = println(">>> subscribe")
+      partitionInfo    <- topics.toList.flatTraverse(consumer.partitionsFor)
       partitions        = partitionInfo.map(pi => new TopicPartition(pi.topic, pi.partition)).toSet
       beginningOffsets <- consumer.beginningOffsets(partitions)
       _                 = println(s"beginningOffsets: $beginningOffsets")
@@ -94,7 +110,13 @@ trait TopicLoader extends LazyLogging {
                           }
       _                 = println(s"endOffsets: $endOffsets")
       logOffsets        = beginningOffsets.map { case (k, v) => k -> LogOffsets(v, endOffsets(k)) }
-    } yield logOffsets.filter { case (_, o) => o.highest > o.lowest }
+      _                 = println(s"logOffsets: $logOffsets")
+//      _                <- consumer.unsubscribe
+    } yield {
+      val filtered = logOffsets.filter { case (_, o) => o.highest > o.lowest }
+      println(s"filtered offsets: $filtered")
+      filtered
+    }
   }
 
   private def emitRecordRemovingConsumedPartition[K, V](

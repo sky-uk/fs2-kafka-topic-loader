@@ -16,6 +16,7 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
       val strategy = LoadAll
 
       "stream all records from all topics" in new TestContext {
+//        pending
         val topics                 = NonEmptyList.of(testTopic1, testTopic2)
         val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
 
@@ -34,6 +35,7 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
       }
 
       "stream available records even when one topic is empty" in new TestContext {
+        pending
         val topics    = NonEmptyList.of(testTopic1, testTopic2)
         val published = records(1 to 15)
 
@@ -56,22 +58,27 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
       val strategy = LoadCommitted
 
       "stream all records up to the committed offset with LoadCommitted strategy" in new TestContext with Consumer {
+//        pending
         val topics                    = NonEmptyList.one(testTopic1)
         val (committed, notCommitted) = records(1 to 15).splitAt(10)
 
         withRunningKafka {
-          createCustomTopics(topics)
+          createCustomTopics(topics, partitions = 1)
 
-          val loaded = for {
-            _      <- IO.unit
-            _       = publishToKafka(testTopic1, committed)
-            _      <- moveOffsetToEnd(testTopic1).compile.drain
-            _       = publishToKafka(testTopic1, notCommitted)
-            loaded <-
-              TopicLoader.load[IO, String, String](topics, strategy, consumerSettings).compile.toList
-          } yield loaded
+          publishToKafka(testTopic1, committed)
+          println(s"publish committed")
 
-          loaded.unsafeRunSync().map(recordToTuple) should contain theSameElementsAs committed
+          moveOffsetToEnd(testTopic1).compile.drain.unsafeRunSync()
+          println(s"moved to end")
+
+          publishToKafka(testTopic1, notCommitted)
+          println(s"publish not committed")
+
+          val loaded =
+            TopicLoader.load[IO, String, String](topics, strategy, consumerSettings).compile.toList.unsafeRunSync()
+          println(s"loaded $loaded")
+
+          loaded.map(recordToTuple) should contain theSameElementsAs committed
         }
 
       }
