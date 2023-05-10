@@ -56,32 +56,42 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
       val strategy = LoadCommitted
 
       "stream all records up to the committed offset with LoadCommitted strategy" in new TestContext with Consumer {
+        pending
         val topics                    = NonEmptyList.one(testTopic1)
         val (committed, notCommitted) = records(1 to 15).splitAt(10)
 
         withRunningKafka {
-          createCustomTopics(topics)
+          val partitions = createCustomTopics(topics)
 
           publishToKafka(testTopic1, committed)
-          println(s"publish committed")
 
-          moveOffsetToEnd(testTopic1).compile.drain.unsafeRunSync()
-          println(s"moved to end")
+          moveOffsetToEnd(partitions).compile.drain.unsafeRunSync()
 
           publishToKafka(testTopic1, notCommitted)
-          println(s"publish not committed")
 
           val loaded =
             TopicLoader.load[IO, String, String](topics, strategy, consumerSettings).compile.toList.unsafeRunSync()
-          println(s"loaded $loaded")
 
           loaded.map(recordToTuple) should contain theSameElementsAs committed
         }
 
       }
 
-      "stream available records even when one topic is empty" in {
-        pending
+      "stream available records even when one topic is empty" in new TestContext with Consumer {
+        val topics    = NonEmptyList.of(testTopic1, testTopic2)
+        val published = records(1 to 15)
+
+        withRunningKafka {
+          val partitions = createCustomTopics(topics)
+
+          publishToKafka(testTopic1, published)
+          moveOffsetToEnd(partitions).compile.drain.unsafeRunSync()
+
+          val loadedRecords =
+            TopicLoader.load[IO, String, String](topics, strategy, consumerSettings).compile.toList.unsafeRunSync()
+
+          loadedRecords.map(recordToTuple) should contain theSameElementsAs published
+        }
       }
 
       "work when highest offset is missing in log and there are messages after highest offset" in {

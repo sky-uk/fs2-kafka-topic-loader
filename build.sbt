@@ -52,3 +52,4 @@ Test / parallelExecution := false
 Test / fork              := true
 
 Global / onChangedBuildSource := ReloadOnSourceChanges
+Global / scalafmtOnCompile    := true

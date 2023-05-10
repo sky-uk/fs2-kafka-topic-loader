@@ -1,10 +1,13 @@
 package base
 
-import cats.data.NonEmptyList
+import cats.Order
+import cats.data.{NonEmptyList, NonEmptySet}
 import cats.effect.{Async, IO, Resource}
+import cats.syntax.all.*
 import fs2.kafka.{AutoOffsetReset, ConsumerRecord, ConsumerSettings, KafkaConsumer}
 import io.github.embeddedkafka.{EmbeddedKafka, EmbeddedKafkaConfig}
 import org.apache.kafka.clients.consumer.ConsumerConfig
+import org.apache.kafka.common.TopicPartition
 import utils.RandomPort
 
 import scala.concurrent.duration.*
@@ -12,6 +15,10 @@ import scala.concurrent.duration.*
 abstract class IntegrationSpecBase extends UnitSpecBase {
 
   override implicit val patienceConfig: PatienceConfig = PatienceConfig(20.seconds, 200.millis)
+
+  implicit object TopicPartitionOrder extends Order[TopicPartition] {
+    override def compare(x: TopicPartition, y: TopicPartition): Int = x.hashCode().compareTo(y.hashCode())
+  }
 
   trait TestContext extends EmbeddedKafka {
 
@@ -28,8 +35,14 @@ abstract class IntegrationSpecBase extends UnitSpecBase {
     val testTopic2          = "load-state-topic-2"
     val testTopicPartitions = 5
 
-    def createCustomTopics(topics: NonEmptyList[String], partitions: Int = testTopicPartitions): Unit =
-      topics.toList.foreach(createCustomTopic(_, partitions = partitions))
+    def createCustomTopics(
+        topics: NonEmptyList[String],
+        partitions: Int = testTopicPartitions
+    ): NonEmptySet[TopicPartition] =
+      topics.flatMap { topic =>
+        createCustomTopic(topic = topic, partitions = partitions)
+        NonEmptyList.fromListUnsafe((0 until partitions).toList).map(i => new TopicPartition(topic, i))
+      }.toNes
 
     def records(r: Seq[Int]): Seq[(String, String)] = r.map(i => s"k$i" -> s"v$i")
 
@@ -39,18 +52,16 @@ abstract class IntegrationSpecBase extends UnitSpecBase {
   trait Consumer {
     this: TestContext =>
 
-    def moveOffsetToEnd(topic: String) =
+    def moveOffsetToEnd(partitions: NonEmptySet[TopicPartition]) =
       KafkaConsumer
         .stream(consumerSettings.withEnableAutoCommit(true))
         .evalTap((consumer: KafkaConsumer[IO, Array[Byte], Array[Byte]]) =>
           for {
-            _ <- consumer.subscribeTo(topic)
+            _ <- consumer.assign(partitions)
             _ <- consumer.seekToEnd
-          } yield consumer // TODO - make this consume one record then stop
+            _ <- partitions.toList.traverse(consumer.position)
+          } yield consumer
         )
-        .records
-        .take(1)
-        .drain
 
     def createConsumer[F[_] : Async](
         autoCommit: Boolean,
