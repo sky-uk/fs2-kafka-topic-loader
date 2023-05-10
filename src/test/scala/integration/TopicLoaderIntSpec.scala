@@ -21,7 +21,7 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
         val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
 
         withRunningKafka {
-          createCustomTopics(topics)
+          createCustomTopics(topics, 1)
 
           publishToKafka(testTopic1, forTopic1)
           publishToKafka(testTopic2, forTopic2)

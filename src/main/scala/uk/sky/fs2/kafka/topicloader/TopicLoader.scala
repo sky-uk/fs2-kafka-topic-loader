@@ -1,6 +1,6 @@
 package uk.sky.fs2.kafka.topicloader
 
-import cats.data.NonEmptyList
+import cats.data.{NonEmptyList, NonEmptySet}
 import cats.effect.Async
 import cats.syntax.all.*
 import com.typesafe.scalalogging.LazyLogging
@@ -8,6 +8,8 @@ import fs2.kafka.{ConsumerRecord, ConsumerSettings, KafkaConsumer, KafkaDeserial
 import fs2.{Pipe, Stream}
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.serialization.Deserializer
+
+import scala.collection.immutable.SortedSet
 
 object TopicLoader extends TopicLoader {
   private[topicloader] case class LogOffsets(lowest: Long, highest: Long)
@@ -19,6 +21,10 @@ object TopicLoader extends TopicLoader {
 
   private implicit class DeserializerOps(private val bytes: Array[Byte]) extends AnyVal {
     def deserialize[T](topic: String)(implicit ds: KafkaDeserializer[T]): T = ds.deserialize(topic, bytes)
+  }
+
+  implicit object TopicPartitionOrdering extends Ordering[TopicPartition] {
+    override def compare(x: TopicPartition, y: TopicPartition): Int = x.topic().compareTo(y.topic())
   }
 
   private object WithRecord {
@@ -39,21 +45,21 @@ trait TopicLoader extends LazyLogging {
       .stream(consumerSettings)
       .evalMap { consumer: KafkaConsumer[F, Array[Byte], Array[Byte]] =>
         for {
-          logOffsets    <- logOffsetsForTopics(topics, strategy, consumer)
-          _              = logger.warn(s"Subscribed to ${topics.mkString_(", ")}")
-//          _             <- consumer.subscribe(topics)
-          _             <- topics.toList.traverse(consumer.assign)
+          logOffsets <- logOffsetsForTopics(topics, strategy, consumer)
+//          _             <- topics.toList.traverse(consumer.assign)
 //          assignment    <- consumer.assignment
 //          _                 = println(s"After Assignment: $assignment")
 //          beginningOffsets <- consumer.beginningOffsets(logOffsets.keySet)
 //          _                 = println(s"Before Assignment: $beginningOffsets")
-//          _                <- beginningOffsets.toList.traverse { case (tp, o) =>
-//                                consumer.seek(tp, o)
-//                              }
-          _             <- consumer.seekToBeginning
-          partitionInfo <- topics.toList.flatTraverse(consumer.partitionsFor)
-          partitions     = partitionInfo.map(pi => new TopicPartition(pi.topic, pi.partition))
+          partitions  = NonEmptySet.fromSet(SortedSet.from(logOffsets.keySet))
+          _          <- partitions match {
+                          case Some(value) => consumer.assign(value)
+                          case None        => ???
+                        }
+          _          <- logOffsets.toList.traverse { case (tp, o) => consumer.seek(tp, o.lowest) }
+//          _          <- consumer.seekToBeginning
         } yield {
+
           val allHighestOffsets: HighestOffsetsWithRecord[K, V] =
             HighestOffsetsWithRecord[K, V](logOffsets.map { case (p, o) => p -> (o.highest - 1) })
 
@@ -97,9 +103,8 @@ trait TopicLoader extends LazyLogging {
       }.map(_.toMap)
 
     for {
-//      _                <- consumer.subscribe(topics)
-      _                <- topics.toList.traverse(consumer.assign)
-      _                 = println(">>> subscribe")
+      _                <- consumer.subscribe(topics)
+      _                 = logger.warn(s"Subscribed to ${topics.mkString_(", ")}")
       partitionInfo    <- topics.toList.flatTraverse(consumer.partitionsFor)
       partitions        = partitionInfo.map(pi => new TopicPartition(pi.topic, pi.partition)).toSet
       beginningOffsets <- consumer.beginningOffsets(partitions)
@@ -111,11 +116,11 @@ trait TopicLoader extends LazyLogging {
       _                 = println(s"endOffsets: $endOffsets")
       logOffsets        = beginningOffsets.map { case (k, v) => k -> LogOffsets(v, endOffsets(k)) }
       _                 = println(s"logOffsets: $logOffsets")
-//      _                <- consumer.unsubscribe
+      _                <- consumer.unsubscribe
     } yield {
-      val filtered = logOffsets.filter { case (_, o) => o.highest > o.lowest }
-      println(s"filtered offsets: $filtered")
-      filtered
+      val nonEmptyOffsets = logOffsets.filter { case (_, o) => o.highest > o.lowest }
+      println(s"nonEmptyOffsets: $nonEmptyOffsets")
+      nonEmptyOffsets
     }
   }
 
