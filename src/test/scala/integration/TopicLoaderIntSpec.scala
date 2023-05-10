@@ -16,12 +16,11 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
       val strategy = LoadAll
 
       "stream all records from all topics" in new TestContext {
-//        pending
         val topics                 = NonEmptyList.of(testTopic1, testTopic2)
         val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
 
         withRunningKafka {
-          createCustomTopics(topics, 1)
+          createCustomTopics(topics, partitions = 2)
 
           publishToKafka(testTopic1, forTopic1)
           publishToKafka(testTopic2, forTopic2)
@@ -35,7 +34,6 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
       }
 
       "stream available records even when one topic is empty" in new TestContext {
-        pending
         val topics    = NonEmptyList.of(testTopic1, testTopic2)
         val published = records(1 to 15)
 
@@ -58,12 +56,11 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
       val strategy = LoadCommitted
 
       "stream all records up to the committed offset with LoadCommitted strategy" in new TestContext with Consumer {
-//        pending
         val topics                    = NonEmptyList.one(testTopic1)
         val (committed, notCommitted) = records(1 to 15).splitAt(10)
 
         withRunningKafka {
-          createCustomTopics(topics, partitions = 1)
+          createCustomTopics(topics)
 
           publishToKafka(testTopic1, committed)
           println(s"publish committed")

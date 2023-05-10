@@ -23,8 +23,8 @@ object TopicLoader extends TopicLoader {
     def deserialize[T](topic: String)(implicit ds: KafkaDeserializer[T]): T = ds.deserialize(topic, bytes)
   }
 
-  implicit object TopicPartitionOrdering extends Ordering[TopicPartition] {
-    override def compare(x: TopicPartition, y: TopicPartition): Int = x.topic().compareTo(y.topic())
+  private implicit object TopicPartitionOrdering extends Ordering[TopicPartition] {
+    override def compare(x: TopicPartition, y: TopicPartition): Int = x.hashCode().compareTo(y.hashCode())
   }
 
   private object WithRecord {
@@ -49,6 +49,7 @@ trait TopicLoader extends LazyLogging {
           maybePartitions = NonEmptySet.fromSet(SortedSet.from(logOffsets.keySet))
           stream         <- maybePartitions match {
                               case Some(partitions) =>
+                                println(s"non empty partitions: $partitions")
                                 val ret1: F[Stream[F, ConsumerRecord[K, V]]] = for {
                                   _ <- consumer.assign(partitions)
                                   _ <- logOffsets.toList.traverse { case (tp, o) => consumer.seek(tp, o.lowest) }
