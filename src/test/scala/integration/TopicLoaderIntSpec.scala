@@ -4,8 +4,14 @@ import base.IntegrationSpecBase
 import cats.data.NonEmptyList
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
+import fs2.kafka.{AutoOffsetReset, ConsumerSettings}
 import io.github.embeddedkafka.Codecs.{stringDeserializer, stringSerializer}
+import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
+import org.scalatest.prop.TableDrivenPropertyChecks.*
+import org.scalatest.prop.Tables.Table
 import uk.sky.fs2.kafka.topicloader.{LoadAll, LoadCommitted, TopicLoader}
+
+import scala.concurrent.duration.*
 
 class TopicLoaderIntSpec extends IntegrationSpecBase {
 
@@ -94,28 +100,95 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
         }
       }
 
-      "work when highest offset is missing in log and there are messages after highest offset" in {
-        pending
+      "work when highest offset is missing in log and there are messages after highest offset" in new TestContext
+        with Consumer {
+        val published                 = records(1 to 10)
+        val (notUpdated, toBeUpdated) = published.splitAt(5)
+
+        withRunningKafka {
+          val partitions =
+            createCustomTopics(NonEmptyList.one(testTopic1), partitions = 1, topicConfig = aggressiveCompactionConfig)
+
+          publishToKafka(testTopic1, published)
+          moveOffsetToEnd(partitions).compile.drain.unsafeRunSync()
+
+          publishToKafkaAndWaitForCompaction(partitions, toBeUpdated.map { case (k, v) => (k, v.reverse) })
+
+          val loadedRecords =
+            TopicLoader
+              .load[IO, String, String](NonEmptyList.one(testTopic1), strategy, consumerSettings)
+              .compile
+              .toList
+              .unsafeRunSync()
+
+          loadedRecords.map(recordToTuple) should contain theSameElementsAs notUpdated
+        }
       }
 
     }
 
     "using any strategy" should {
 
-      "complete successfully if the topic is empty" in {
-        pending
+      val loadStrategy = Table("strategy", LoadAll, LoadCommitted)
+
+      "complete successfully if the topic is empty" in new TestContext {
+        val topics = NonEmptyList.one(testTopic1)
+
+        withRunningKafka {
+          createCustomTopics(topics)
+
+          forEvery(loadStrategy) { strategy =>
+            TopicLoader
+              .load[IO, String, String](topics, strategy, consumerSettings)
+              .compile
+              .toList
+              .unsafeRunSync() shouldBe empty
+          }
+        }
       }
 
-      "read partitions that have been compacted" in {
-        pending
+      "read partitions that have been compacted" in new TestContext with Consumer {
+        val published        = records(1 to 10)
+        val topic            = NonEmptyList.one(testTopic1)
+        val publishedUpdated = published.map { case (k, v) => (k, v.reverse) }
+
+        forEvery(loadStrategy) { strategy =>
+          withRunningKafka {
+            val partitions = createCustomTopics(topic, partitions = 1, topicConfig = aggressiveCompactionConfig)
+
+            publishToKafkaAndWaitForCompaction(partitions, published ++ publishedUpdated)
+
+            val loadedRecords =
+              TopicLoader.load[IO, String, String](topic, strategy, consumerSettings).compile.toList.unsafeRunSync()
+
+            loadedRecords.map(recordToTuple) should contain noElementsOf published
+          }
+        }
       }
 
     }
 
     "Kafka is misbehaving" should {
 
-      "fail if unavailable at startup" in {
-        pending
+      "fail if unavailable at startup" in new TestContext {
+        val badConsumerSettings = ConsumerSettings[IO, Array[Byte], Array[Byte]]
+          .withBootstrapServers("localhost:6001")
+          .withAutoOffsetReset(AutoOffsetReset.Earliest)
+          .withGroupId("test-consumer-group")
+          .withRequestTimeout(700.millis)
+          .withSessionTimeout(500.millis)
+          .withHeartbeatInterval(300.millis)
+          .withDefaultApiTimeout(1000.millis)
+
+        val exception = intercept[Throwable](
+          TopicLoader
+            .load[IO, String, String](NonEmptyList.one(testTopic1), LoadAll, badConsumerSettings)
+            .compile
+            .drain
+            .unsafeRunSync()
+        )
+
+        exception shouldBe a[KafkaTimeoutException]
       }
 
     }
