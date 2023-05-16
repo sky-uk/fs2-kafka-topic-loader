@@ -11,6 +11,9 @@ import uk.sky.fs2.kafka.topicloader.{LoadCommitted, TopicLoader}
 
 import scala.concurrent.duration.*
 
+/** Simple application that streams Kafka records into a memory store, and produce the same record back to Kafka. On
+  * startup, it will read all of the currently committed records back into this store, but not produce them to Kafka.
+  */
 class LoadExample[F[_] : Async, G[_] : Traverse](
     load: Stream[F, String],
     run: Stream[F, G[String]],
