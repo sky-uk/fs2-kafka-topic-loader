@@ -1,6 +1,6 @@
 package uk.sky.fs2.kafka.topicloader
 
-import cats.data.{NonEmptyList, NonEmptySet}
+import cats.data.{NonEmptyList, NonEmptyMap}
 import cats.effect.Async
 import cats.syntax.all.*
 import com.typesafe.scalalogging.LazyLogging
@@ -8,7 +8,7 @@ import fs2.kafka.{ConsumerRecord, ConsumerSettings, KafkaConsumer}
 import fs2.{Pipe, Stream}
 import org.apache.kafka.common.TopicPartition
 
-import scala.collection.immutable.SortedSet
+import scala.collection.immutable.SortedMap
 
 object TopicLoader extends TopicLoader {
   private[topicloader] case class LogOffsets(lowest: Long, highest: Long)
@@ -38,38 +38,37 @@ trait TopicLoader extends LazyLogging {
   ): Stream[F, ConsumerRecord[K, V]] =
     KafkaConsumer
       .stream(consumerSettings)
-      .evalMap { consumer =>
+      .evalMap(consumer =>
         for {
           logOffsets     <- logOffsetsForTopics(topics, strategy, consumer)
-          maybePartitions = NonEmptySet.fromSet(SortedSet.from(logOffsets.keySet))
-          stream         <-
-            maybePartitions.fold[F[Stream[F, ConsumerRecord[K, V]]]](Async[F].pure(Stream.empty)) { partitions =>
-              logger.debug(s"non empty partitions: $partitions")
+          maybeLogOffsets = NonEmptyMap.fromMap(SortedMap.from(logOffsets))
+        } yield maybeLogOffsets.fold[Stream[F, ConsumerRecord[K, V]]](Stream.empty) { logOffsets =>
+          Stream
+            .eval(
               for {
-                _ <- consumer.assign(partitions)
-                _ <- logOffsets.toList.traverse { case (tp, o) => consumer.seek(tp, o.lowest) }
-              } yield {
-
-                val allHighestOffsets: HighestOffsetsWithRecord[K, V] =
-                  HighestOffsetsWithRecord[K, V](logOffsets.map { case (p, o) => p -> (o.highest - 1) })
-
-                logger.debug(s"allHighestOffsets: $allHighestOffsets")
-
-                val filterBelowHighestOffset: Pipe[F, ConsumerRecord[K, V], ConsumerRecord[K, V]] =
-                  _.scan(allHighestOffsets)(emitRecordRemovingConsumedPartition)
-                    .takeWhile(_.partitionOffsets.nonEmpty, takeFailure = true)
-                    .collect { case WithRecord(r) => r }
-
-                consumer.records
-                  .map(_.record)
-                  .through(filterBelowHighestOffset)
-              }
-            }
-        } yield stream
-      }
+                _ <- consumer.assign(logOffsets.keys)
+                _ <- logOffsets.toNel.traverse { case (tp, o) => consumer.seek(tp, o.lowest) }
+              } yield consumer.records
+                .map(_.record)
+                .through(filterBelowHighestOffset(logOffsets))
+            )
+            .flatten
+        }
+      )
       .flatten
 
   def loadAndRun(): Unit = ()
+
+  protected def filterBelowHighestOffset[F[_], K, V](
+      logOffsets: NonEmptyMap[TopicPartition, LogOffsets]
+  ): Pipe[F, ConsumerRecord[K, V], ConsumerRecord[K, V]] = {
+    val allHighestOffsets: HighestOffsetsWithRecord[K, V] =
+      HighestOffsetsWithRecord[K, V](logOffsets.toSortedMap.map { case (p, o) => p -> (o.highest - 1) })
+
+    _.scan(allHighestOffsets)(emitRecordRemovingConsumedPartition)
+      .takeWhile(_.partitionOffsets.nonEmpty, takeFailure = true)
+      .collect { case WithRecord(r) => r }
+  }
 
   protected def logOffsetsForTopics[F[_] : Async, K, V](
       topics: NonEmptyList[String],
@@ -87,24 +86,16 @@ trait TopicLoader extends LazyLogging {
 
     for {
       _                <- consumer.subscribe(topics)
-      _                 = logger.debug(s"Subscribed to ${topics.mkString_(", ")}")
       partitionInfo    <- topics.toList.flatTraverse(consumer.partitionsFor)
       partitions        = partitionInfo.map(pi => new TopicPartition(pi.topic, pi.partition)).toSet
       beginningOffsets <- consumer.beginningOffsets(partitions)
-      _                 = logger.debug(s"beginningOffsets: $beginningOffsets")
       endOffsets       <- strategy match {
                             case LoadAll       => consumer.endOffsets(partitions)
                             case LoadCommitted => earliestOffsets(consumer, beginningOffsets)
                           }
-      _                 = logger.debug(s"endOffsets: $endOffsets")
       logOffsets        = beginningOffsets.map { case (k, v) => k -> LogOffsets(v, endOffsets(k)) }
-      _                 = logger.debug(s"logOffsets: $logOffsets")
       _                <- consumer.unsubscribe
-    } yield {
-      val nonEmptyOffsets = logOffsets.filter { case (_, o) => o.highest > o.lowest }
-      logger.debug(s"nonEmptyOffsets: $nonEmptyOffsets")
-      nonEmptyOffsets
-    }
+    } yield logOffsets.filter { case (_, o) => o.highest > o.lowest }
   }
 
   private def emitRecordRemovingConsumedPartition[K, V](
