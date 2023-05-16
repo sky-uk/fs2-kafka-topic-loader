@@ -2,13 +2,14 @@ package integration
 
 import base.WordSpecBase
 import cats.data.NonEmptyList
-import cats.effect.IO
 import cats.effect.unsafe.implicits.global
+import cats.effect.{IO, Ref}
 import fs2.Pipe
 import fs2.kafka.*
 import io.github.embeddedkafka.Codecs.stringSerializer
 import io.github.embeddedkafka.{EmbeddedKafka, EmbeddedKafkaConfig}
 import load.LoadExample
+import org.scalatest.Assertion
 import org.scalatest.concurrent.Eventually
 import uk.sky.fs2.kafka.topicloader.{LoadCommitted, TopicLoader}
 import utils.RandomPort
@@ -39,27 +40,39 @@ class LoadExampleIntSpec extends WordSpecBase with Eventually {
           .through(commitBatchWithin[IO](1, 5.seconds))
           .drain
 
-      val example1 = new LoadExample(load = loadStream, run = runStream, publish = publish, commit = commit)
+      val store: IO[Ref[IO, List[String]]] = Ref[IO].of(List.empty)
 
       withRunningKafka {
+
         publishToKafka(inputTopic, "key1", "value1")
 
         eventually {
-          // TODO - find a way to finish the stream better
-          example1.stream.interruptAfter(timeout).compile.drain.unsafeRunSync()
+          val assertion: IO[Assertion] = for {
+            store   <- store
+            example1 =
+              new LoadExample(load = loadStream, run = runStream, publish = publish, commit = commit, store = store)
+            _       <- example1.stream.interruptAfter(timeout).compile.drain
+            stored  <- store.get
+          } yield stored should contain theSameElementsInOrderAs List("value1")
 
-          example1.store should contain theSameElementsInOrderAs List("value1")
+          assertion.unsafeRunSync()
 
           consumeFirstStringMessageFrom(outputTopic, autoCommit = true) shouldBe "value1"
         }
 
-        example1.store.clear()
         publishToKafka(inputTopic, "key2", "value2")
 
         eventually {
-          example1.stream.interruptAfter(timeout).compile.drain.unsafeRunSync()
 
-          example1.store should contain theSameElementsInOrderAs List("value1", "value2")
+          val assertion: IO[Assertion] = for {
+            store   <- store
+            example1 =
+              new LoadExample(load = loadStream, run = runStream, publish = publish, commit = commit, store = store)
+            _       <- example1.stream.interruptAfter(timeout).compile.drain
+            stored  <- store.get
+          } yield stored should contain theSameElementsInOrderAs List("value1", "value2")
+
+          assertion.unsafeRunSync()
 
           consumeFirstStringMessageFrom(outputTopic, autoCommit = true) shouldBe "value2"
         }
