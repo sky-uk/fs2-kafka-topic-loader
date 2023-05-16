@@ -31,7 +31,7 @@ object LoadExample {
       consumerSettings: ConsumerSettings[F, String, String],
       producerSettings: ProducerSettings[F, String, String],
       store: Ref[F, List[String]]
-  ) = {
+  ): LoadExample[F, CommittableConsumerRecord[F, String, *]] = {
     val loadStream = TopicLoader.load[F, String, String](topics, LoadCommitted, consumerSettings).map(_.value)
 
     val runStream = KafkaConsumer.stream(consumerSettings).subscribe(topics).records
