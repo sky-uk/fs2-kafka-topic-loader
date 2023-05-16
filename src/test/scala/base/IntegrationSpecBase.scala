@@ -36,8 +36,8 @@ abstract class IntegrationSpecBase extends UnitSpecBase {
     val testTopic2          = "load-state-topic-2"
     val testTopicPartitions = 5
 
-    val consumerSettings: ConsumerSettings[IO, Array[Byte], Array[Byte]] =
-      ConsumerSettings[IO, Array[Byte], Array[Byte]]
+    val consumerSettings: ConsumerSettings[IO, String, String] =
+      ConsumerSettings[IO, String, String]
         .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
         .withAutoOffsetReset(AutoOffsetReset.Earliest)
         .withGroupId(groupId)

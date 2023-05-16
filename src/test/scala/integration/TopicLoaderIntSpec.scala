@@ -5,7 +5,7 @@ import cats.data.NonEmptyList
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
 import fs2.kafka.{AutoOffsetReset, ConsumerSettings}
-import io.github.embeddedkafka.Codecs.{stringDeserializer, stringSerializer}
+import io.github.embeddedkafka.Codecs.stringSerializer
 import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
 import org.scalatest.prop.TableDrivenPropertyChecks.*
 import org.scalatest.prop.Tables.Table
@@ -170,7 +170,7 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
     "Kafka is misbehaving" should {
 
       "fail if unavailable at startup" in new TestContext {
-        val badConsumerSettings = ConsumerSettings[IO, Array[Byte], Array[Byte]]
+        val badConsumerSettings = ConsumerSettings[IO, String, String]
           .withBootstrapServers("localhost:6001")
           .withAutoOffsetReset(AutoOffsetReset.Earliest)
           .withGroupId("test-consumer-group")

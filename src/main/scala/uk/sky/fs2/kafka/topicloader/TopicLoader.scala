@@ -4,10 +4,9 @@ import cats.data.{NonEmptyList, NonEmptySet}
 import cats.effect.Async
 import cats.syntax.all.*
 import com.typesafe.scalalogging.LazyLogging
-import fs2.kafka.{ConsumerRecord, ConsumerSettings, KafkaConsumer, KafkaDeserializer}
+import fs2.kafka.{ConsumerRecord, ConsumerSettings, KafkaConsumer}
 import fs2.{Pipe, Stream}
 import org.apache.kafka.common.TopicPartition
-import org.apache.kafka.common.serialization.Deserializer
 
 import scala.collection.immutable.SortedSet
 
@@ -18,10 +17,6 @@ object TopicLoader extends TopicLoader {
       partitionOffsets: Map[TopicPartition, Long],
       consumerRecord: Option[ConsumerRecord[K, V]] = none[ConsumerRecord[K, V]]
   )
-
-  private implicit class DeserializerOps(private val bytes: Array[Byte]) extends AnyVal {
-    def deserialize[T](topic: String)(implicit ds: KafkaDeserializer[T]): T = ds.deserialize(topic, bytes)
-  }
 
   private implicit object TopicPartitionOrdering extends Ordering[TopicPartition] {
     override def compare(x: TopicPartition, y: TopicPartition): Int = x.hashCode().compareTo(y.hashCode())
@@ -36,14 +31,14 @@ trait TopicLoader extends LazyLogging {
 
   import TopicLoader.*
 
-  def load[F[_] : Async, K : Deserializer, V : Deserializer](
+  def load[F[_] : Async, K, V](
       topics: NonEmptyList[String],
       strategy: LoadTopicStrategy,
-      consumerSettings: ConsumerSettings[F, Array[Byte], Array[Byte]]
+      consumerSettings: ConsumerSettings[F, K, V]
   ): Stream[F, ConsumerRecord[K, V]] =
     KafkaConsumer
       .stream(consumerSettings)
-      .evalMap { consumer: KafkaConsumer[F, Array[Byte], Array[Byte]] =>
+      .evalMap { consumer =>
         for {
           logOffsets     <- logOffsetsForTopics(topics, strategy, consumer)
           maybePartitions = NonEmptySet.fromSet(SortedSet.from(logOffsets.keySet))
@@ -66,7 +61,7 @@ trait TopicLoader extends LazyLogging {
                     .collect { case WithRecord(r) => r }
 
                 consumer.records
-                  .map(cr => cr.bimap(_.deserialize[K](cr.record.topic), _.deserialize[V](cr.record.topic)).record)
+                  .map(_.record)
                   .through(filterBelowHighestOffset)
               }
             }
@@ -76,13 +71,13 @@ trait TopicLoader extends LazyLogging {
 
   def loadAndRun(): Unit = ()
 
-  protected def logOffsetsForTopics[F[_] : Async](
+  protected def logOffsetsForTopics[F[_] : Async, K, V](
       topics: NonEmptyList[String],
       strategy: LoadTopicStrategy,
-      consumer: KafkaConsumer[F, Array[Byte], Array[Byte]]
+      consumer: KafkaConsumer[F, K, V]
   ): F[Map[TopicPartition, LogOffsets]] = {
     def earliestOffsets(
-        consumer: KafkaConsumer[F, Array[Byte], Array[Byte]],
+        consumer: KafkaConsumer[F, K, V],
         beginningOffsets: Map[TopicPartition, Long]
     ): F[Map[TopicPartition, Long]] =
       beginningOffsets.toList.traverse { case (p, o) =>
