@@ -22,6 +22,8 @@ object Main extends IOApp.Simple {
 }
 ```
 
+See [LoadExample.scala](./it/src/main/scala/load/LoadExample.scala) for a more detailed example.
+
 ## Configuration
 
 Configuration from the Topic Loader is done via the `ConsumerSettings`. The group id of the Topic Loader should match
