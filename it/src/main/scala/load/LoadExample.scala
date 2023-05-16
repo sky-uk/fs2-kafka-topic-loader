@@ -9,7 +9,7 @@ import fs2.kafka.*
 import fs2.{Pipe, Stream}
 import uk.sky.fs2.kafka.topicloader.{LoadCommitted, TopicLoader}
 
-import scala.concurrent.duration.DurationInt
+import scala.concurrent.duration.*
 
 class LoadExample[F[_] : Async, G[_] : Traverse](
     load: Stream[F, String],
