@@ -9,13 +9,12 @@ import fs2.{Pipe, Stream}
 class LoadExample[F[_] : Async, G[_] : Traverse](
     load: Stream[F, String],
     run: Stream[F, G[String]],
-    publish: Pipe[F, G[String], Nothing],
-    commit: Pipe[F, G[String], Nothing],
+    publishAndCommit: Pipe[F, G[String], Nothing],
     store: Ref[F, List[String]]
 ) {
   private def process(message: String): F[Unit] = store.update(_ :+ message)
 
   val stream: Stream[F, G[String]] =
-    (load.evalTap(process).drain ++ run.evalTap(_.traverse(process))).observe(publish).observe(commit)
+    (load.evalTap(process).drain ++ run.evalTap(_.traverse(process))).observe(publishAndCommit)
 
 }

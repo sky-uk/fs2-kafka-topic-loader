@@ -25,20 +25,18 @@ class LoadExampleIntSpec extends WordSpecBase with Eventually {
 
       val runStream = KafkaConsumer.stream(consumerSettings).subscribe(topics).records
 
-      // TODO - combine with commit
-      val publish: Pipe[IO, CommittableConsumerRecord[IO, String, String], Nothing] =
+      val publishAndCommit: Pipe[IO, CommittableConsumerRecord[IO, String, String], Nothing] =
         _.map(message =>
-          ProducerRecords.one(
+          message.offset -> ProducerRecords.one(
             ProducerRecord(topic = outputTopic, key = message.record.key, value = message.record.value)
           )
-        )
-          .through(KafkaProducer.pipe(producerSettings))
-          .drain
-
-      val commit: Pipe[IO, CommittableConsumerRecord[IO, String, String], Nothing] =
-        _.map(_.offset)
-          .through(commitBatchWithin[IO](1, 5.seconds))
-          .drain
+        ).through { offsetsAndProducerRecords =>
+          KafkaProducer.stream(producerSettings).flatMap { producer =>
+            offsetsAndProducerRecords.evalMap { case (offset, producerRecord) =>
+              producer.produce(producerRecord).flatMap(_.as(offset))
+            }
+          }
+        }.through(commitBatchWithin[IO](1, 5.seconds)).drain
 
       val store: IO[Ref[IO, List[String]]] = Ref[IO].of(List.empty)
 
@@ -50,7 +48,12 @@ class LoadExampleIntSpec extends WordSpecBase with Eventually {
           val assertion: IO[Assertion] = for {
             store   <- store
             example1 =
-              new LoadExample(load = loadStream, run = runStream, publish = publish, commit = commit, store = store)
+              new LoadExample(
+                load = loadStream,
+                run = runStream,
+                publishAndCommit = publishAndCommit,
+                store = store
+              )
             _       <- example1.stream.interruptAfter(timeout).compile.drain
             stored  <- store.get
           } yield stored should contain theSameElementsInOrderAs List("value1")
@@ -67,7 +70,12 @@ class LoadExampleIntSpec extends WordSpecBase with Eventually {
           val assertion: IO[Assertion] = for {
             store   <- store
             example1 =
-              new LoadExample(load = loadStream, run = runStream, publish = publish, commit = commit, store = store)
+              new LoadExample(
+                load = loadStream,
+                run = runStream,
+                publishAndCommit = publishAndCommit,
+                store = store
+              )
             _       <- example1.stream.interruptAfter(timeout).compile.drain
             stored  <- store.get
           } yield stored should contain theSameElementsInOrderAs List("value1", "value2")
