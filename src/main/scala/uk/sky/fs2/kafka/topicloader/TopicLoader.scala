@@ -49,7 +49,7 @@ trait TopicLoader extends LazyLogging {
           maybePartitions = NonEmptySet.fromSet(SortedSet.from(logOffsets.keySet))
           stream         <-
             maybePartitions.fold[F[Stream[F, ConsumerRecord[K, V]]]](Async[F].pure(Stream.empty)) { partitions =>
-              println(s"non empty partitions: $partitions")
+              logger.debug(s"non empty partitions: $partitions")
               for {
                 _ <- consumer.assign(partitions)
                 _ <- logOffsets.toList.traverse { case (tp, o) => consumer.seek(tp, o.lowest) }
@@ -58,7 +58,7 @@ trait TopicLoader extends LazyLogging {
                 val allHighestOffsets: HighestOffsetsWithRecord[K, V] =
                   HighestOffsetsWithRecord[K, V](logOffsets.map { case (p, o) => p -> (o.highest - 1) })
 
-                println(s"allHighestOffsets: $allHighestOffsets")
+                logger.debug(s"allHighestOffsets: $allHighestOffsets")
 
                 val filterBelowHighestOffset: Pipe[F, ConsumerRecord[K, V], ConsumerRecord[K, V]] =
                   _.scan(allHighestOffsets)(emitRecordRemovingConsumedPartition)
@@ -67,7 +67,6 @@ trait TopicLoader extends LazyLogging {
 
                 consumer.records
                   .map(cr => cr.bimap(_.deserialize[K](cr.record.topic), _.deserialize[V](cr.record.topic)).record)
-                  .debug()
                   .through(filterBelowHighestOffset)
               }
             }
@@ -87,36 +86,28 @@ trait TopicLoader extends LazyLogging {
         beginningOffsets: Map[TopicPartition, Long]
     ): F[Map[TopicPartition, Long]] =
       beginningOffsets.toList.traverse { case (p, o) =>
-        println(s"Partition: ${p}")
-        println(s"Offsets: ${o}")
         val committed = consumer.committed(Set(p))
-        println(s"committed: $committed")
-        committed.map { foo =>
-          println(s"committed 2: ${foo}")
-          val toGet = foo.get(p).flatMap(Option.apply)
-          println(s"toGet: ${toGet}")
-          p -> toGet.fold(o)(_.offset)
-        }
+        committed.map(offsets => p -> offsets.get(p).flatMap(Option.apply).fold(o)(_.offset))
       }.map(_.toMap)
 
     for {
       _                <- consumer.subscribe(topics)
-      _                 = logger.warn(s"Subscribed to ${topics.mkString_(", ")}")
+      _                 = logger.debug(s"Subscribed to ${topics.mkString_(", ")}")
       partitionInfo    <- topics.toList.flatTraverse(consumer.partitionsFor)
       partitions        = partitionInfo.map(pi => new TopicPartition(pi.topic, pi.partition)).toSet
       beginningOffsets <- consumer.beginningOffsets(partitions)
-      _                 = println(s"beginningOffsets: $beginningOffsets")
+      _                 = logger.debug(s"beginningOffsets: $beginningOffsets")
       endOffsets       <- strategy match {
                             case LoadAll       => consumer.endOffsets(partitions)
                             case LoadCommitted => earliestOffsets(consumer, beginningOffsets)
                           }
-      _                 = println(s"endOffsets: $endOffsets")
+      _                 = logger.debug(s"endOffsets: $endOffsets")
       logOffsets        = beginningOffsets.map { case (k, v) => k -> LogOffsets(v, endOffsets(k)) }
-      _                 = println(s"logOffsets: $logOffsets")
+      _                 = logger.debug(s"logOffsets: $logOffsets")
       _                <- consumer.unsubscribe
     } yield {
       val nonEmptyOffsets = logOffsets.filter { case (_, o) => o.highest > o.lowest }
-      println(s"nonEmptyOffsets: $nonEmptyOffsets")
+      logger.debug(s"nonEmptyOffsets: $nonEmptyOffsets")
       nonEmptyOffsets
     }
   }

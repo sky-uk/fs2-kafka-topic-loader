@@ -5,12 +5,12 @@ import java.util.UUID
 import cats.Order
 import cats.data.{NonEmptyList, NonEmptySet}
 import cats.effect.unsafe.implicits.global
-import cats.effect.{Async, IO, Resource}
+import cats.effect.{IO, Resource}
 import cats.syntax.all.*
+import fs2.Stream
 import fs2.kafka.{AutoOffsetReset, ConsumerRecord, ConsumerSettings, KafkaConsumer}
 import io.github.embeddedkafka.Codecs.stringSerializer
 import io.github.embeddedkafka.{EmbeddedKafka, EmbeddedKafkaConfig}
-import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.common.TopicPartition
 import org.scalatest.Assertion
 import org.scalatest.LoneElement.*
@@ -31,15 +31,16 @@ abstract class IntegrationSpecBase extends UnitSpecBase {
     implicit lazy val kafkaConfig: EmbeddedKafkaConfig =
       EmbeddedKafkaConfig(kafkaPort = RandomPort(), zooKeeperPort = RandomPort(), Map("log.roll.ms" -> "10"))
 
+    val groupId             = "test-consumer-group"
+    val testTopic1          = "load-state-topic-1"
+    val testTopic2          = "load-state-topic-2"
+    val testTopicPartitions = 5
+
     val consumerSettings: ConsumerSettings[IO, Array[Byte], Array[Byte]] =
       ConsumerSettings[IO, Array[Byte], Array[Byte]]
         .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
         .withAutoOffsetReset(AutoOffsetReset.Earliest)
-        .withGroupId("test-consumer-group")
-
-    val testTopic1          = "load-state-topic-1"
-    val testTopic2          = "load-state-topic-2"
-    val testTopicPartitions = 5
+        .withGroupId(groupId)
 
     def createCustomTopics(
         topics: NonEmptyList[String],
@@ -78,7 +79,22 @@ abstract class IntegrationSpecBase extends UnitSpecBase {
     }
   }
 
-  trait Consumer { this: TestContext =>
+  trait TestConsumer { this: TestContext =>
+
+    def moveOffsetToEnd(partitions: NonEmptySet[TopicPartition]) =
+      withAssignedConsumer(
+        autoCommit = true,
+        offsetReset = AutoOffsetReset.Latest,
+        partitions = partitions,
+        groupId = groupId.some
+      )(
+        _.evalMap(consumer =>
+          for {
+            _ <- consumer.seekToEnd
+            _ <- partitions.toList.traverse(consumer.position)
+          } yield consumer
+        )
+      )
 
     def publishToKafkaAndWaitForCompaction(
         partitions: NonEmptySet[TopicPartition],
@@ -88,74 +104,69 @@ abstract class IntegrationSpecBase extends UnitSpecBase {
       waitForCompaction(partitions)
     }
 
-    def moveOffsetToEnd(partitions: NonEmptySet[TopicPartition]) =
-      KafkaConsumer
-        .stream(consumerSettings.withEnableAutoCommit(true))
-        .evalTap(consumer =>
-          for {
-            _ <- consumer.assign(partitions)
-            _ <- consumer.seekToEnd
-            _ <- partitions.toList.traverse(consumer.position)
-          } yield consumer
-        )
-
-    // TODO - split this out
-    def waitForCompaction(partitions: NonEmptySet[TopicPartition]): Assertion = {
-      val consumerSettings = ConsumerSettings[IO, String, String]
-        .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
-        .withAutoOffsetReset(AutoOffsetReset.Earliest)
-        .withGroupId(UUID.randomUUID().toString)
-
-      eventually {
-        val messages = KafkaConsumer
-          .stream(consumerSettings)
-          .evalTap(consumer =>
-            for {
-              _ <- consumer.assign(partitions)
-              _ <- consumer.seekToBeginning
-            } yield consumer
-          )
-          .records
-          .map(_.record)
-          .interruptAfter(1.second)
-          .compile
-          .toList
-          .unsafeRunSync()
-
-        val records     = messages.map(r => r.key -> r.value)
-        val messageKeys = records.map { case (k, _) => k }
-        println(s"non-compacted messages: $messageKeys")
+    def waitForCompaction(partitions: NonEmptySet[TopicPartition]): Assertion =
+      consumeEventually(partitions) { r =>
+        val messageKeys = r.map { case (k, _) => k }
         messageKeys should contain theSameElementsAs messageKeys.toSet
       }
-    }
-    //      consumeEventually(topic) { r =>
-//        val messageKeys = r.map { case (k, _) => k }
-//        messageKeys should contain theSameElementsAs messageKeys.toSet
-//      }
-//
-//    def consumeEventually(topic: String, groupId: String = UUID.randomUUID().toString)(
-//        f: List[(String, String)] => Assertion
-//    ): Assertion =
-//      eventually {
-//        val records = withAssignedConsumer(autoCommit = false, offsetReset = "earliest", topic, groupId.some)(
-//          consumeAllKafkaRecordsFromEarliestOffset(_, List.empty)
-//        )
-//
-//        f(records.map(r => r.key -> r.value))
-//      }
 
-    def createConsumer[F[_] : Async](
+    def consumeEventually(
+        partitions: NonEmptySet[TopicPartition],
+        groupId: String = UUID.randomUUID().toString
+    )(
+        f: List[(String, String)] => Assertion
+    ): Assertion =
+      eventually {
+        val records = withAssignedConsumer[List[ConsumerRecord[String, String]]](
+          autoCommit = false,
+          offsetReset = AutoOffsetReset.Earliest,
+          partitions,
+          groupId.some
+        )(
+          _.records
+            .map(_.record)
+            .interruptAfter(1.second)
+            .compile
+            .toList
+            .unsafeRunSync()
+        )
+
+        f(records.map(r => r.key -> r.value))
+      }
+
+    def withAssignedConsumer[T](
         autoCommit: Boolean,
-        offsetReset: String,
+        offsetReset: AutoOffsetReset,
+        partitions: NonEmptySet[TopicPartition],
+        groupId: Option[String] = None
+    )(f: Stream[IO, KafkaConsumer[IO, String, String]] => T): T = {
+      val consumer = createConsumer(autoCommit, offsetReset, groupId)
+
+      val stream = Stream
+        .resource(consumer)
+        .evalMap(c =>
+          for {
+            _ <- c.assign(partitions)
+            _ <- c.seekToBeginning
+          } yield c
+        )
+
+      f(stream)
+    }
+
+    def createConsumer(
+        autoCommit: Boolean,
+        offsetReset: AutoOffsetReset,
         groupId: Option[String]
-    ): Resource[F, KafkaConsumer[F, String, String]] = {
+    ): Resource[IO, KafkaConsumer[IO, String, String]] = {
       val baseSettings =
-        ConsumerSettings[F, String, String]
-          .withProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, autoCommit.toString)
-          .withProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, offsetReset)
+        ConsumerSettings[IO, String, String]
+          .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
+          .withEnableAutoCommit(autoCommit)
+          .withAutoOffsetReset(offsetReset)
 
       val settings = groupId.fold(baseSettings)(baseSettings.withGroupId)
-      KafkaConsumer[F].resource(settings)
+      KafkaConsumer[IO].resource(settings)
     }
   }
 

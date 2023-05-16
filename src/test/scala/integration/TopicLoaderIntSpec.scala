@@ -61,8 +61,7 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
 
       val strategy = LoadCommitted
 
-      "stream all records up to the committed offset with LoadCommitted strategy" in new TestContext with Consumer {
-        pending
+      "stream all records up to the committed offset with LoadCommitted strategy" in new TestContext with TestConsumer {
         val topics                    = NonEmptyList.one(testTopic1)
         val (committed, notCommitted) = records(1 to 15).splitAt(10)
 
@@ -83,7 +82,7 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
 
       }
 
-      "stream available records even when one topic is empty" in new TestContext with Consumer {
+      "stream available records even when one topic is empty" in new TestContext with TestConsumer {
         val topics    = NonEmptyList.of(testTopic1, testTopic2)
         val published = records(1 to 15)
 
@@ -101,7 +100,7 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
       }
 
       "work when highest offset is missing in log and there are messages after highest offset" in new TestContext
-        with Consumer {
+        with TestConsumer {
         val published                 = records(1 to 10)
         val (notUpdated, toBeUpdated) = published.splitAt(5)
 
@@ -147,7 +146,7 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
         }
       }
 
-      "read partitions that have been compacted" in new TestContext with Consumer {
+      "read partitions that have been compacted" in new TestContext with TestConsumer {
         val published        = records(1 to 10)
         val topic            = NonEmptyList.one(testTopic1)
         val publishedUpdated = published.map { case (k, v) => (k, v.reverse) }
