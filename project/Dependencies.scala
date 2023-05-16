@@ -21,4 +21,8 @@ object Dependencies {
 
   lazy val scalaLogging   = "com.typesafe.scala-logging" %% "scala-logging"   % "3.9.5"
   lazy val logbackClassic = "ch.qos.logback"              % "logback-classic" % "1.4.6" % Runtime
+
+  val scala3Exclusions = Seq(
+    "com.typesafe.scala-logging" % "scala-logging_2.13"
+  )
 }

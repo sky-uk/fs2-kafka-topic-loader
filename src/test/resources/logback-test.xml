@@ -5,7 +5,7 @@
         </encoder>
     </appender>
 
-    <root level="${LOG_LEVEL:-WARN}">
+    <root level="${LOG_LEVEL:-OFF}">
         <appender-ref ref="STDOUT"/>
     </root>
 

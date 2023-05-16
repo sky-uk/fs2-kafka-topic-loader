@@ -9,10 +9,8 @@ ThisBuild / organization := "uk.sky"
 ThisBuild / description  := "Read the contents of provided Kafka topics"
 ThisBuild / licenses     := List("BSD New" -> url("https://opensource.org/licenses/BSD-3-Clause"))
 
-ThisBuild / scalaVersion       := scala213 // TODO - for development to get unused warnings
-ThisBuild / crossScalaVersions := supportedScalaVersions
-ThisBuild / semanticdbEnabled  := true
-ThisBuild / semanticdbVersion  := scalafixSemanticdb.revision
+ThisBuild / semanticdbEnabled := true
+ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
 ThisBuild / scalafixDependencies += Dependencies.Plugins.organizeImports
 
@@ -20,7 +18,9 @@ tpolecatScalacOptions ++= Set(ScalacOptions.source3)
 
 lazy val root = (project in file("."))
   .settings(
-    name := "fs2-kafka-topic-loader",
+    name               := "fs2-kafka-topic-loader",
+    scalaVersion       := scala213, // TODO - for development to get unused warnings
+    crossScalaVersions := supportedScalaVersions,
     libraryDependencies ++= Seq(
       Cats.core,
       Cats.effect,
@@ -32,6 +32,24 @@ lazy val root = (project in file("."))
       logbackClassic
     )
   )
+
+lazy val it = (project in file("it"))
+  .settings(
+    name         := "integration-test",
+    scalaVersion := scala213, // TODO - for development to get unused warnings
+    publish      := false,
+    libraryDependencies ++= Seq(
+      Cats.core,
+      Cats.effect,
+      Fs2.core,
+      Fs2.kafka,
+      embeddedKafka,
+      scalaTest,
+      scalaLogging,
+      logbackClassic
+    )
+  )
+  .dependsOn(root % "test->test;compile->compile")
 
 /** Scala 3 doesn't support two rules yet - RemoveUnused and ProcedureSyntax. So we require a different scalafix config
   * for Scala 3
@@ -45,6 +63,13 @@ ThisBuild / scalafixConfig := {
   CrossVersion.partialVersion(scalaVersion.value) match {
     case Some((3, _)) => Some((ThisBuild / baseDirectory).value / ".scalafix3.conf")
     case _            => None
+  }
+}
+
+ThisBuild / excludeDependencies ++= {
+  CrossVersion.partialVersion(scalaVersion.value) match {
+    case Some((3, _)) => Dependencies.scala3Exclusions
+    case _            => Seq.empty
   }
 }
 
