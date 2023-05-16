@@ -4,14 +4,12 @@ import base.WordSpecBase
 import cats.data.NonEmptyList
 import cats.effect.unsafe.implicits.global
 import cats.effect.{IO, Ref}
-import fs2.Pipe
 import fs2.kafka.*
 import io.github.embeddedkafka.Codecs.stringSerializer
 import io.github.embeddedkafka.{EmbeddedKafka, EmbeddedKafkaConfig}
 import load.LoadExample
 import org.scalatest.Assertion
 import org.scalatest.concurrent.Eventually
-import uk.sky.fs2.kafka.topicloader.{LoadCommitted, TopicLoader}
 import utils.RandomPort
 
 import scala.concurrent.duration.*
@@ -20,23 +18,6 @@ class LoadExampleIntSpec extends WordSpecBase with Eventually {
 
   "LoadExample" should {
     "load previously seen messages into the store before processing new messages" in new TestContext {
-
-      val loadStream = TopicLoader.load[IO, String, String](topics, LoadCommitted, consumerSettings).map(_.value)
-
-      val runStream = KafkaConsumer.stream(consumerSettings).subscribe(topics).records
-
-      val publishAndCommit: Pipe[IO, CommittableConsumerRecord[IO, String, String], Nothing] =
-        _.map(message =>
-          message.offset -> ProducerRecords.one(
-            ProducerRecord(topic = outputTopic, key = message.record.key, value = message.record.value)
-          )
-        ).through { offsetsAndProducerRecords =>
-          KafkaProducer.stream(producerSettings).flatMap { producer =>
-            offsetsAndProducerRecords.evalMap { case (offset, producerRecord) =>
-              producer.produce(producerRecord).flatMap(_.as(offset))
-            }
-          }
-        }.through(commitBatchWithin[IO](1, 5.seconds)).drain
 
       val store: IO[Ref[IO, List[String]]] = Ref[IO].of(List.empty)
 
@@ -48,10 +29,11 @@ class LoadExampleIntSpec extends WordSpecBase with Eventually {
           val assertion: IO[Assertion] = for {
             store   <- store
             example1 =
-              new LoadExample(
-                load = loadStream,
-                run = runStream,
-                publishAndCommit = publishAndCommit,
+              LoadExample.kafka[IO](
+                topics = topics,
+                outputTopic = outputTopic,
+                consumerSettings = consumerSettings,
+                producerSettings = producerSettings,
                 store = store
               )
             _       <- example1.stream.interruptAfter(timeout).compile.drain
@@ -70,10 +52,11 @@ class LoadExampleIntSpec extends WordSpecBase with Eventually {
           val assertion: IO[Assertion] = for {
             store   <- store
             example1 =
-              new LoadExample(
-                load = loadStream,
-                run = runStream,
-                publishAndCommit = publishAndCommit,
+              LoadExample.kafka[IO](
+                topics = topics,
+                outputTopic = outputTopic,
+                consumerSettings = consumerSettings,
+                producerSettings = producerSettings,
                 store = store
               )
             _       <- example1.stream.interruptAfter(timeout).compile.drain
