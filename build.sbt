@@ -19,7 +19,7 @@ tpolecatScalacOptions ++= Set(ScalacOptions.source3)
 lazy val root = (project in file("."))
   .settings(
     name               := "fs2-kafka-topic-loader",
-    scalaVersion       := scala213, // TODO - for development to get unused warnings
+    scalaVersion       := scala213,
     crossScalaVersions := supportedScalaVersions,
     libraryDependencies ++= Seq(
       Cats.core,
@@ -36,7 +36,7 @@ lazy val root = (project in file("."))
 lazy val it = (project in file("it"))
   .settings(
     name         := "integration-test",
-    scalaVersion := scala213, // TODO - for development to get unused warnings
+    scalaVersion := scala213,
     publish      := false,
     libraryDependencies ++= Seq(
       Cats.core,
