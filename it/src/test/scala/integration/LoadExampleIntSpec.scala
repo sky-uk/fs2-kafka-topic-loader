@@ -8,7 +8,6 @@ import fs2.kafka.*
 import io.github.embeddedkafka.Codecs.stringSerializer
 import io.github.embeddedkafka.{EmbeddedKafka, EmbeddedKafkaConfig}
 import load.LoadExample
-import org.scalatest.Assertion
 import org.scalatest.concurrent.Eventually
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jFactory
@@ -29,8 +28,8 @@ class LoadExampleIntSpec extends WordSpecBase with Eventually {
 
         publishToKafka(inputTopic, "key1", "value1")
 
-        eventually {
-          val assertion: IO[Assertion] = for {
+        {
+          for {
             store   <- store
             example1 =
               LoadExample.kafka[IO](
@@ -42,18 +41,17 @@ class LoadExampleIntSpec extends WordSpecBase with Eventually {
               )
             _       <- example1.stream.interruptAfter(timeout).compile.drain
             stored  <- store.get
-          } yield stored should contain theSameElementsInOrderAs List("value1")
+          } yield stored
+        }.unsafeRunSync() should contain theSameElementsInOrderAs List("value1")
 
-          assertion.unsafeRunSync()
-
+        eventually {
           consumeFirstStringMessageFrom(outputTopic, autoCommit = true) shouldBe "value1"
         }
 
         publishToKafka(inputTopic, "key2", "value2")
 
-        eventually {
-
-          val assertion: IO[Assertion] = for {
+        {
+          for {
             store   <- store
             example1 =
               LoadExample.kafka[IO](
@@ -65,10 +63,10 @@ class LoadExampleIntSpec extends WordSpecBase with Eventually {
               )
             _       <- example1.stream.interruptAfter(timeout).compile.drain
             stored  <- store.get
-          } yield stored should contain theSameElementsInOrderAs List("value1", "value2")
+          } yield stored
+        }.unsafeRunSync() should contain theSameElementsInOrderAs List("value1", "value2")
 
-          assertion.unsafeRunSync()
-
+        eventually {
           consumeFirstStringMessageFrom(outputTopic, autoCommit = true) shouldBe "value2"
         }
       }
