@@ -24,11 +24,12 @@ lazy val root = (project in file("."))
     libraryDependencies ++= Seq(
       Cats.core,
       Cats.effect,
+      Cats.log4cats,
+      Cats.log4catsSlf4j,
       Fs2.core,
       Fs2.kafka,
       embeddedKafka,
       scalaTest,
-      scalaLogging,
       logbackClassic
     )
   )
@@ -45,7 +46,6 @@ lazy val it = (project in file("it"))
       Fs2.kafka,
       embeddedKafka,
       scalaTest,
-      scalaLogging,
       logbackClassic
     )
   )

@@ -9,11 +9,15 @@ import io.github.embeddedkafka.Codecs.stringSerializer
 import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
 import org.scalatest.prop.TableDrivenPropertyChecks.*
 import org.scalatest.prop.Tables.Table
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jFactory
 import uk.sky.fs2.kafka.topicloader.{LoadAll, LoadCommitted, TopicLoader}
 
 import scala.concurrent.duration.*
 
 class TopicLoaderIntSpec extends IntegrationSpecBase {
+
+  implicit val logger: Logger[IO] = Slf4jFactory.create[IO].getLogger
 
   "load" when {
 
