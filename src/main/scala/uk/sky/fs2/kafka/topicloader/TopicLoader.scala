@@ -39,23 +39,20 @@ trait TopicLoader {
   ): Stream[F, ConsumerRecord[K, V]] =
     KafkaConsumer
       .stream(consumerSettings)
-      .evalMap(consumer =>
-        for {
-          logOffsets     <- logOffsetsForTopics(topics, strategy, consumer)
-          maybeLogOffsets = NonEmptyMap.fromMap(SortedMap.from(logOffsets))
-        } yield maybeLogOffsets.fold[Stream[F, ConsumerRecord[K, V]]](Stream.empty) { logOffsets =>
-          Stream
-            .eval(
-              for {
-                _ <- consumer.assign(logOffsets.keys)
-                _ <- logOffsets.toNel.traverse { case (tp, o) => consumer.seek(tp, o.lowest) }
-              } yield consumer.records
-                .map(_.record)
-                .through(filterBelowHighestOffset(logOffsets))
-            )
-            .flatten
-        }
-      )
+      .evalMap { consumer =>
+        {
+          for {
+            allLogOffsets <- OptionT.liftF(logOffsetsForTopics(topics, strategy, consumer))
+            logOffsets    <- OptionT.fromOption(NonEmptyMap.fromMap(SortedMap.from(allLogOffsets)))
+            _             <- OptionT.liftF(
+                               consumer.assign(logOffsets.keys) *>
+                                 logOffsets.toNel.traverse { case (tp, o) => consumer.seek(tp, o.lowest) }
+                             )
+          } yield consumer.records
+            .map(_.record)
+            .through(filterBelowHighestOffset(logOffsets))
+        }.getOrElse(Stream.empty)
+      }
       .flatten
 
   def loadAndRun(): Unit = ()
