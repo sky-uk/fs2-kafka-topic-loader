@@ -72,29 +72,27 @@ trait TopicLoader {
       topics: NonEmptyList[String],
       strategy: LoadTopicStrategy,
       consumer: KafkaConsumer[F, K, V]
-  ): F[Map[TopicPartition, LogOffsets]] = {
-    def earliestOffsets(
-        consumer: KafkaConsumer[F, K, V],
-        beginningOffsets: Map[TopicPartition, Long]
-    ): F[Map[TopicPartition, Long]] =
-      beginningOffsets.toList.traverse { case (p, o) =>
-        val committed = consumer.committed(Set(p))
-        committed.map(offsets => p -> offsets.get(p).flatMap(Option.apply).fold(o)(_.offset))
-      }.map(_.toMap)
+  ): F[Map[TopicPartition, LogOffsets]] = for {
+    _                <- consumer.subscribe(topics)
+    partitionInfo    <- topics.toList.flatTraverse(consumer.partitionsFor)
+    topicPartitions   = partitionInfo.map(pi => new TopicPartition(pi.topic, pi.partition)).toSet
+    beginningOffsets <- consumer.beginningOffsets(topicPartitions)
+    endOffsets       <- strategy match {
+                          case LoadAll       => consumer.endOffsets(topicPartitions)
+                          case LoadCommitted => earliestOffsets(consumer, beginningOffsets)
+                        }
+    logOffsets        = beginningOffsets.map { case (k, v) => k -> LogOffsets(v, endOffsets(k)) }
+    _                <- consumer.unsubscribe
+  } yield logOffsets.filter { case (_, o) => o.highest > o.lowest }
 
-    for {
-      _                <- consumer.subscribe(topics)
-      partitionInfo    <- topics.toList.flatTraverse(consumer.partitionsFor)
-      topicPartitions   = partitionInfo.map(pi => new TopicPartition(pi.topic, pi.partition)).toSet
-      beginningOffsets <- consumer.beginningOffsets(topicPartitions)
-      endOffsets       <- strategy match {
-                            case LoadAll       => consumer.endOffsets(topicPartitions)
-                            case LoadCommitted => earliestOffsets(consumer, beginningOffsets)
-                          }
-      logOffsets        = beginningOffsets.map { case (k, v) => k -> LogOffsets(v, endOffsets(k)) }
-      _                <- consumer.unsubscribe
-    } yield logOffsets.filter { case (_, o) => o.highest > o.lowest }
-  }
+  protected def earliestOffsets[F[_] : Monad, K, V](
+      consumer: KafkaConsumer[F, K, V],
+      beginningOffsets: Map[TopicPartition, Long]
+  ): F[Map[TopicPartition, Long]] =
+    beginningOffsets.toList.traverse { case (p, o) =>
+      val committed = consumer.committed(Set(p))
+      committed.map(offsets => p -> offsets.get(p).flatMap(Option.apply).fold(o)(_.offset))
+    }.map(_.toMap)
 
   private def emitRecordRemovingConsumedPartition[F[_] : Monad, K, V](
       t: HighestOffsetsWithRecord[K, V],
