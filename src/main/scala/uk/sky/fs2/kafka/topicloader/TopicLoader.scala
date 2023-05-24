@@ -85,10 +85,10 @@ trait TopicLoader {
     for {
       _                <- consumer.subscribe(topics)
       partitionInfo    <- topics.toList.flatTraverse(consumer.partitionsFor)
-      partitions        = partitionInfo.map(pi => new TopicPartition(pi.topic, pi.partition)).toSet
-      beginningOffsets <- consumer.beginningOffsets(partitions)
+      topicPartitions   = partitionInfo.map(pi => new TopicPartition(pi.topic, pi.partition)).toSet
+      beginningOffsets <- consumer.beginningOffsets(topicPartitions)
       endOffsets       <- strategy match {
-                            case LoadAll       => consumer.endOffsets(partitions)
+                            case LoadAll       => consumer.endOffsets(topicPartitions)
                             case LoadCommitted => earliestOffsets(consumer, beginningOffsets)
                           }
       logOffsets        = beginningOffsets.map { case (k, v) => k -> LogOffsets(v, endOffsets(k)) }
