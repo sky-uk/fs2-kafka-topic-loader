@@ -10,6 +10,8 @@ import io.github.embeddedkafka.{EmbeddedKafka, EmbeddedKafkaConfig}
 import load.LoadExample
 import org.scalatest.Assertion
 import org.scalatest.concurrent.Eventually
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jFactory
 import utils.RandomPort
 
 import scala.concurrent.duration.*
@@ -20,6 +22,8 @@ class LoadExampleIntSpec extends WordSpecBase with Eventually {
     "load previously seen messages into the store before processing new messages" in new TestContext {
 
       val store: IO[Ref[IO, List[String]]] = Ref[IO].of(List.empty)
+
+      implicit val logger: Logger[IO] = Slf4jFactory.create[IO].getLogger
 
       withRunningKafka {
 
