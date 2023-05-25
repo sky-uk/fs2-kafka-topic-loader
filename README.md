@@ -1,7 +1,9 @@
 # fs2-kafka-topic-loader
 
-Reads the contents of provided Kafka topics, either the topics in their entirety or up until a consumer groups last
-committed Offset depending on which `LoadTopicStrategy` you provide.
+Reads the contents of provided Kafka topics, in one of two ways: 
+- reads the topics in their entirety  
+- reads up to the last consumer group's committed Offset 
+This is determined by the `LoadTopicStrategy`.
 
 Add the following to your `build.sbt`:
 
