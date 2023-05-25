@@ -30,6 +30,7 @@ lazy val root = (project in file("."))
       Fs2.kafka,
       embeddedKafka,
       scalaTest,
+      catsEffectTesting,
       logbackClassic
     )
   )
@@ -46,6 +47,7 @@ lazy val it = (project in file("it"))
       Fs2.kafka,
       embeddedKafka,
       scalaTest,
+      catsEffectTesting,
       logbackClassic
     )
   )
