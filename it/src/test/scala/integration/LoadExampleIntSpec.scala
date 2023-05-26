@@ -1,6 +1,6 @@
 package integration
 
-import base.KafkaSpecBase
+import base.{AsyncIntSpecBase, KafkaSpecBase}
 import cats.data.NonEmptyList
 import cats.effect.{Async, IO, Ref}
 import cats.syntax.all.*
@@ -11,7 +11,7 @@ import org.typelevel.log4cats.slf4j.Slf4jFactory
 
 import scala.concurrent.duration.*
 
-class LoadExampleIntSpec extends KafkaSpecBase[IO] {
+class LoadExampleIntSpec extends AsyncIntSpecBase {
 
   "LoadExample" should {
     "load previously seen messages into the store" in {
@@ -47,7 +47,7 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
     }
   }
 
-  private abstract class TestContext[F[_] : Async] {
+  private abstract class TestContext[F[_] : Async] extends KafkaSpecBase[IO] {
     val inputTopic  = "test-topic-1"
     val outputTopic = "output-topic-1"
 
