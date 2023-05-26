@@ -1,23 +1,15 @@
 package integration
 
-import base.IntegrationSpecBase
+import base.{AsyncIntSpecBase, TestConsumer, TestContext}
 import cats.data.NonEmptyList
 import cats.effect.IO
-import cats.effect.unsafe.implicits.global
 import fs2.kafka.{AutoOffsetReset, ConsumerSettings}
-import io.github.embeddedkafka.Codecs.stringSerializer
 import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
-import org.scalatest.prop.TableDrivenPropertyChecks.*
-import org.scalatest.prop.Tables.Table
-import org.typelevel.log4cats.Logger
-import org.typelevel.log4cats.slf4j.Slf4jFactory
-import uk.sky.fs2.kafka.topicloader.{LoadAll, LoadCommitted, TopicLoader}
+import uk.sky.fs2.kafka.topicloader.{LoadAll, LoadCommitted}
 
 import scala.concurrent.duration.*
 
-class TopicLoaderIntSpec extends IntegrationSpecBase {
-
-  implicit val logger: Logger[IO] = Slf4jFactory.create[IO].getLogger
+class TopicLoaderIntSpec extends AsyncIntSpecBase {
 
   "load" when {
 
@@ -25,37 +17,40 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
 
       val strategy = LoadAll
 
-      "stream all records from all topics" in new TestContext {
+      "stream all records from all topics" in {
+        object testContext extends TestContext[IO]
+        import testContext.*
+
         val topics                 = NonEmptyList.of(testTopic1, testTopic2)
         val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
 
-        withRunningKafka {
-          createCustomTopics(topics, partitions = 2)
-
-          publishToKafka(testTopic1, forTopic1)
-          publishToKafka(testTopic2, forTopic2)
-
-          val loadedRecords =
-            TopicLoader.load[IO, String, String](topics, strategy, consumerSettings).compile.toList.unsafeRunSync()
-
-          loadedRecords.map(recordToTuple) should contain theSameElementsAs (forTopic1 ++ forTopic2)
+        embeddedKafka.use { _ =>
+          for {
+            _         <- createCustomTopics(topics, partitions = 2)
+            _         <- publishStringMessages(testTopic1, forTopic1)
+            _         <- publishStringMessages(testTopic2, forTopic2)
+            assertion <- runLoader(topics, strategy) { result =>
+                           result.asserting(_ should contain theSameElementsAs (forTopic1 ++ forTopic2))
+                         }
+          } yield assertion
         }
-
       }
 
-      "stream available records even when one topic is empty" in new TestContext {
+      "stream available records even when one topic is empty" in {
+        object testContext extends TestContext[IO]
+        import testContext.*
+
         val topics    = NonEmptyList.of(testTopic1, testTopic2)
         val published = records(1 to 15)
 
-        withRunningKafka {
-          createCustomTopics(topics)
-
-          publishToKafka(testTopic1, published)
-
-          val loadedRecords =
-            TopicLoader.load[IO, String, String](topics, strategy, consumerSettings).compile.toList.unsafeRunSync()
-
-          loadedRecords.map(recordToTuple) should contain theSameElementsAs published
+        embeddedKafka.use { _ =>
+          for {
+            _         <- createCustomTopics(topics)
+            _         <- publishStringMessages(testTopic1, published)
+            assertion <- runLoader(topics, strategy) { result =>
+                           result.asserting(_ should contain theSameElementsAs published)
+                         }
+          } yield assertion
         }
       }
 
@@ -65,106 +60,155 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
 
       val strategy = LoadCommitted
 
-      "stream all records up to the committed offset with LoadCommitted strategy" in new TestContext with TestConsumer {
+      "stream all records up to the committed offset with LoadCommitted strategy" in {
+        object testContext extends TestConsumer[IO]
+        import testContext.*
+
         val topics                    = NonEmptyList.one(testTopic1)
         val (committed, notCommitted) = records(1 to 15).splitAt(10)
 
-        withRunningKafka {
-          val partitions = createCustomTopics(topics)
-
-          publishToKafka(testTopic1, committed)
-
-          moveOffsetToEnd(partitions).compile.drain.unsafeRunSync()
-
-          publishToKafka(testTopic1, notCommitted)
-
-          val loaded =
-            TopicLoader.load[IO, String, String](topics, strategy, consumerSettings).compile.toList.unsafeRunSync()
-
-          loaded.map(recordToTuple) should contain theSameElementsAs committed
+        embeddedKafka.use { _ =>
+          for {
+            partitions <- createCustomTopics(topics)
+            _          <- publishStringMessages(testTopic1, committed)
+            _          <- moveOffsetToEnd(partitions).compile.drain
+            _          <- publishStringMessages(testTopic1, notCommitted)
+            assertion  <- runLoader(topics, strategy) { result =>
+                            result.asserting(_ should contain theSameElementsAs committed)
+                          }
+          } yield assertion
         }
 
       }
 
-      "stream available records even when one topic is empty" in new TestContext with TestConsumer {
+      "stream available records even when one topic is empty" in {
+        object testContext extends TestConsumer[IO]
+        import testContext.*
+
         val topics    = NonEmptyList.of(testTopic1, testTopic2)
         val published = records(1 to 15)
 
-        withRunningKafka {
-          val partitions = createCustomTopics(topics)
-
-          publishToKafka(testTopic1, published)
-          moveOffsetToEnd(partitions).compile.drain.unsafeRunSync()
-
-          val loadedRecords =
-            TopicLoader.load[IO, String, String](topics, strategy, consumerSettings).compile.toList.unsafeRunSync()
-
-          loadedRecords.map(recordToTuple) should contain theSameElementsAs published
+        embeddedKafka.use { _ =>
+          for {
+            partitions <- createCustomTopics(topics)
+            _          <- publishStringMessages(testTopic1, published)
+            _          <- moveOffsetToEnd(partitions).compile.drain
+            assertion  <- runLoader(topics, strategy) { result =>
+                            result.asserting(_ should contain theSameElementsAs published)
+                          }
+          } yield assertion
         }
       }
 
-      "work when highest offset is missing in log and there are messages after highest offset" in new TestContext
-        with TestConsumer {
+      "work when highest offset is missing in log and there are messages after highest offset" in {
+        object testContext extends TestConsumer[IO]
+        import testContext.*
+
         val published                 = records(1 to 10)
         val (notUpdated, toBeUpdated) = published.splitAt(5)
 
-        withRunningKafka {
-          val partitions =
-            createCustomTopics(NonEmptyList.one(testTopic1), partitions = 1, topicConfig = aggressiveCompactionConfig)
+        embeddedKafka.use { _ =>
+          for {
+            partitions <-
+              createCustomTopics(NonEmptyList.one(testTopic1), partitions = 1, topicConfig = aggressiveCompactionConfig)
+            _          <- publishStringMessages(testTopic1, published)
+            _          <- moveOffsetToEnd(partitions).compile.drain
+            _          <- publishToKafkaAndWaitForCompaction(partitions, toBeUpdated.map { case (k, v) => (k, v.reverse) })
+            assertion  <- runLoader(NonEmptyList.one(testTopic1), strategy) { result =>
+                            result.asserting(_ should contain theSameElementsAs notUpdated)
+                          }
 
-          publishToKafka(testTopic1, published)
-          moveOffsetToEnd(partitions).compile.drain.unsafeRunSync()
-
-          publishToKafkaAndWaitForCompaction(partitions, toBeUpdated.map { case (k, v) => (k, v.reverse) })
-
-          val loadedRecords =
-            TopicLoader
-              .load[IO, String, String](NonEmptyList.one(testTopic1), strategy, consumerSettings)
-              .compile
-              .toList
-              .unsafeRunSync()
-
-          loadedRecords.map(recordToTuple) should contain theSameElementsAs notUpdated
+          } yield assertion
         }
       }
-
     }
 
-    "using any strategy" should {
+    /*
+    TODO - Property testing doesn't work very well, even when using scalacheck-effect.
+     Basically cats-effect-testing expects an IO[Assertion] but the `check()` from a PropF from scalacheck-effect returns
+     a Future[TestResult].
+     So we'd have to map on the Future and match on the inner TestResult returning a new assertion depending on if the
+     match was a success or not.
+     See this thread: https://github.com/typelevel/scalacheck-effect/issues/261
+     */
+    "using any strategy" when {
 
-      val loadStrategy = Table("strategy", LoadAll, LoadCommitted)
+      "strategy is LoadAll" should {
 
-      "complete successfully if the topic is empty" in new TestContext {
-        val topics = NonEmptyList.one(testTopic1)
+        val strategy = LoadAll
 
-        withRunningKafka {
-          createCustomTopics(topics)
+        "complete successfully if the topic is empty" in {
+          object testContext extends TestContext[IO]
+          import testContext.*
 
-          forEvery(loadStrategy) { strategy =>
-            TopicLoader
-              .load[IO, String, String](topics, strategy, consumerSettings)
-              .compile
-              .toList
-              .unsafeRunSync() shouldBe empty
+          val topics = NonEmptyList.one(testTopic1)
+
+          embeddedKafka.use { _ =>
+            for {
+              assertion <- runLoader(topics, strategy) { result =>
+                             result.asserting(_ shouldBe empty)
+                           }
+            } yield assertion
+          }
+        }
+
+        "read partitions that have been compacted" in {
+          object testContext extends TestConsumer[IO]
+          import testContext.*
+
+          val published        = records(1 to 10)
+          val topic            = NonEmptyList.one(testTopic1)
+          val publishedUpdated = published.map { case (k, v) => (k, v.reverse) }
+
+          embeddedKafka.use { _ =>
+            for {
+              partitions <- createCustomTopics(topic, partitions = 1, topicConfig = aggressiveCompactionConfig)
+              _          <- publishToKafkaAndWaitForCompaction(partitions, published ++ publishedUpdated)
+              assertion  <- runLoader(topic, strategy) { result =>
+                              result.asserting(_ should contain noElementsOf published)
+                            }
+            } yield assertion
           }
         }
       }
 
-      "read partitions that have been compacted" in new TestContext with TestConsumer {
-        val published        = records(1 to 10)
-        val topic            = NonEmptyList.one(testTopic1)
-        val publishedUpdated = published.map { case (k, v) => (k, v.reverse) }
+      "strategy is LoadCommitted" should {
 
-        forEvery(loadStrategy) { strategy =>
-          withRunningKafka {
-            val partitions = createCustomTopics(topic, partitions = 1, topicConfig = aggressiveCompactionConfig)
+        val strategy = LoadCommitted
 
-            publishToKafkaAndWaitForCompaction(partitions, published ++ publishedUpdated)
+        // TODO - duplicate test - see above
+        "complete successfully if the topic is empty" in {
+          object testContext extends TestContext[IO]
+          import testContext.*
 
-            val loadedRecords =
-              TopicLoader.load[IO, String, String](topic, strategy, consumerSettings).compile.toList.unsafeRunSync()
+          val topics = NonEmptyList.one(testTopic1)
 
-            loadedRecords.map(recordToTuple) should contain noElementsOf published
+          embeddedKafka.use { _ =>
+            for {
+              assertion <- runLoader(topics, strategy) { result =>
+                             result.asserting(_ shouldBe empty)
+                           }
+            } yield assertion
+          }
+        }
+
+        // TODO - duplicate test - see above
+        "read partitions that have been compacted" in {
+          object testContext extends TestConsumer[IO]
+          import testContext.*
+
+          val published        = records(1 to 10)
+          val topic            = NonEmptyList.one(testTopic1)
+          val publishedUpdated = published.map { case (k, v) => (k, v.reverse) }
+
+          embeddedKafka.use { _ =>
+            for {
+              partitions <- createCustomTopics(topic, partitions = 1, topicConfig = aggressiveCompactionConfig)
+              _          <- publishToKafkaAndWaitForCompaction(partitions, published ++ publishedUpdated)
+              assertion  <- runLoader(topic, strategy) { result =>
+                              result.asserting(_ should contain noElementsOf published)
+                            }
+            } yield assertion
           }
         }
       }
@@ -173,7 +217,10 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
 
     "Kafka is misbehaving" should {
 
-      "fail if unavailable at startup" in new TestContext {
+      "fail if unavailable at startup" in {
+        object testContext extends TestContext[IO]
+        import testContext.*
+
         val badConsumerSettings = ConsumerSettings[IO, String, String]
           .withBootstrapServers("localhost:6001")
           .withAutoOffsetReset(AutoOffsetReset.Earliest)
@@ -183,15 +230,11 @@ class TopicLoaderIntSpec extends IntegrationSpecBase {
           .withHeartbeatInterval(300.millis)
           .withDefaultApiTimeout(1000.millis)
 
-        val exception = intercept[Throwable](
-          TopicLoader
-            .load[IO, String, String](NonEmptyList.one(testTopic1), LoadAll, badConsumerSettings)
-            .compile
-            .drain
-            .unsafeRunSync()
-        )
-
-        exception shouldBe a[KafkaTimeoutException]
+        for {
+          assertion <- runLoader(NonEmptyList.one(testTopic1), LoadAll, badConsumerSettings) { result =>
+                         result.assertThrows[KafkaTimeoutException]
+                       }
+        } yield assertion
       }
 
     }
