@@ -7,7 +7,7 @@ import cats.syntax.all.*
 import fs2.kafka.{ConsumerRecord, ConsumerSettings, KafkaConsumer}
 import fs2.{Pipe, Stream}
 import org.apache.kafka.common.TopicPartition
-import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.LoggerFactory
 
 import scala.collection.immutable.SortedMap
 
@@ -32,7 +32,7 @@ trait TopicLoader {
 
   import TopicLoader.*
 
-  def load[F[_] : Async : Logger, K, V](
+  def load[F[_] : Async : LoggerFactory, K, V](
       topics: NonEmptyList[String],
       strategy: LoadTopicStrategy,
       consumerSettings: ConsumerSettings[F, K, V]
@@ -57,7 +57,7 @@ trait TopicLoader {
 
   def loadAndRun(): Unit = ()
 
-  protected def filterBelowHighestOffset[F[_] : Monad : Logger, K, V](
+  protected def filterBelowHighestOffset[F[_] : Monad : LoggerFactory, K, V](
       logOffsets: NonEmptyMap[TopicPartition, LogOffsets]
   ): Pipe[F, ConsumerRecord[K, V], ConsumerRecord[K, V]] = {
     val allHighestOffsets: HighestOffsetsWithRecord[K, V] =
@@ -94,10 +94,12 @@ trait TopicLoader {
       committed.map(offsets => p -> offsets.get(p).flatMap(Option.apply).fold(o)(_.offset))
     }.map(_.toMap)
 
-  private def emitRecordRemovingConsumedPartition[F[_] : Monad, K, V](
+  private def emitRecordRemovingConsumedPartition[F[_] : Monad : LoggerFactory, K, V](
       t: HighestOffsetsWithRecord[K, V],
       r: ConsumerRecord[K, V]
-  )(implicit logger: Logger[F]): F[HighestOffsetsWithRecord[K, V]] = {
+  ): F[HighestOffsetsWithRecord[K, V]] = {
+    val logger = LoggerFactory[F].getLogger
+
     val partitionHighest: Option[Long] = t.partitionOffsets.get(new TopicPartition(r.topic, r.partition))
 
     val reachedHighest: OptionT[F, TopicPartition] = for {

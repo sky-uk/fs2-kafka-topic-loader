@@ -7,7 +7,7 @@ import cats.effect.kernel.Async
 import cats.syntax.all.*
 import fs2.kafka.*
 import fs2.{Pipe, Stream}
-import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.LoggerFactory
 import uk.sky.fs2.kafka.topicloader.{LoadCommitted, TopicLoader}
 
 import scala.concurrent.duration.*
@@ -29,7 +29,7 @@ class LoadExample[F[_] : Async, G[_] : Traverse](
 }
 
 object LoadExample {
-  def kafka[F[_] : Async : Logger](
+  def kafka[F[_] : Async : LoggerFactory](
       topics: NonEmptyList[String],
       outputTopic: String,
       consumerSettings: ConsumerSettings[F, String, String],

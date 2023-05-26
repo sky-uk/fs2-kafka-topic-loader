@@ -6,7 +6,7 @@ import cats.effect.{Async, IO, Ref}
 import cats.syntax.all.*
 import fs2.kafka.*
 import load.LoadExample
-import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.slf4j.Slf4jFactory
 
 import scala.concurrent.duration.*
@@ -53,7 +53,7 @@ class LoadExampleIntSpec extends AsyncIntSpecBase {
 
     private val store: F[Ref[F, List[String]]] = Ref[F].of(List.empty)
 
-    private implicit val logger: Logger[F] = Slf4jFactory.create[F].getLogger
+    private implicit val loggerFactory: LoggerFactory[F] = Slf4jFactory.create[F]
 
     private val timeout = 10.seconds
 

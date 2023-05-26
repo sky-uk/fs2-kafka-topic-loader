@@ -13,7 +13,7 @@ import io.github.embeddedkafka.{EmbeddedKafka, EmbeddedKafkaConfig}
 import kafka.server.KafkaServer
 import org.apache.kafka.common.TopicPartition
 import org.scalatest.exceptions.TestFailedException
-import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.slf4j.Slf4jFactory
 import uk.sky.fs2.kafka.topicloader.{LoadTopicStrategy, TopicLoader}
 import utils.RandomPort
@@ -43,7 +43,7 @@ abstract class TestContext[F[_]](implicit F: Async[F]) extends KafkaSpecBase[F] 
     override def compare(x: TopicPartition, y: TopicPartition): Int = x.hashCode().compareTo(y.hashCode())
   }
 
-  private implicit val logger: Logger[F] = Slf4jFactory.create[F].getLogger
+  private implicit val loggerFactory: LoggerFactory[F] = Slf4jFactory.create[F]
 
   val groupId             = "test-consumer-group"
   val testTopic1          = "load-state-topic-1"
