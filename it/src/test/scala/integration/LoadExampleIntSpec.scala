@@ -11,7 +11,8 @@ import org.typelevel.log4cats.slf4j.Slf4jFactory
 
 import scala.concurrent.duration.*
 
-class LoadExampleIntSpec extends AsyncIntSpecBase {
+class LoadExampleIntSpec extends KafkaSpecBase[IO] {
+
 
   "LoadExample" should {
     "load previously seen messages into the store" in {
