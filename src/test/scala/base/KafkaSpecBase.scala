@@ -1,14 +1,14 @@
 package base
 
 import java.util.UUID
-
 import cats.Order
 import cats.data.{NonEmptyList, NonEmptySet}
-import cats.effect.{Async, Resource, Sync}
+import cats.effect.{Async, Resource}
 import cats.syntax.all.*
 import fs2.Stream
-import fs2.kafka.{AutoOffsetReset, ConsumerRecord, ConsumerSettings, KafkaConsumer}
+import fs2.kafka.*
 import io.github.embeddedkafka.Codecs.stringSerializer
+import io.github.embeddedkafka.EmbeddedKafka.*
 import io.github.embeddedkafka.{EmbeddedKafka, EmbeddedKafkaConfig}
 import kafka.server.KafkaServer
 import org.apache.kafka.common.TopicPartition
@@ -20,24 +20,25 @@ import utils.RandomPort
 
 import scala.concurrent.duration.*
 
-abstract class KafkaSpecBase[F[_]](implicit F: Sync[F]) extends EmbeddedKafka {
-  implicit lazy val kafkaConfig: EmbeddedKafkaConfig =
-    EmbeddedKafkaConfig(kafkaPort = RandomPort(), zooKeeperPort = RandomPort(), Map("log.roll.ms" -> "10"))
+abstract class KafkaSpecBase[F[_]](implicit F: Async[F]) extends AsyncIntSpecBase {
+//  implicit lazy val kafkaConfig: EmbeddedKafkaConfig =
+//    EmbeddedKafkaConfig(kafkaPort = RandomPort(), zooKeeperPort = RandomPort(), Map("log.roll.ms" -> "10"))
 
-  val embeddedKafka: Resource[F, KafkaServer] =
+  def embeddedKafka(implicit kafkaConfig: EmbeddedKafkaConfig): Resource[F, KafkaServer] =
     Resource.make(F.delay(EmbeddedKafka.start().broker))(server => F.delay(server.shutdown()).void)
 
-  def publishStringMessage(topic: String, key: String, message: String): F[Unit] =
+  def publishStringMessage(topic: String, key: String, message: String)(implicit
+      kafkaConfig: EmbeddedKafkaConfig
+  ): F[Unit] =
     F.delay(publishToKafka(topic, key, message))
 
-  def publishStringMessages(topic: String, messages: Seq[(String, String)]): F[Unit] =
+  def publishStringMessages(topic: String, messages: Seq[(String, String)])(implicit
+      kafkaConfig: EmbeddedKafkaConfig
+  ): F[Unit] =
     messages.traverse { case (k, v) => publishStringMessage(topic, k, v) }.void
 
-  def consumeStringMessage(topic: String, autoCommit: Boolean): F[String] =
+  def consumeStringMessage(topic: String, autoCommit: Boolean)(implicit kafkaConfig: EmbeddedKafkaConfig): F[String] =
     F.delay(consumeFirstStringMessageFrom(topic, autoCommit = autoCommit))
-}
-
-abstract class TestContext[F[_]](implicit F: Async[F]) extends KafkaSpecBase[F] {
 
   implicit object TopicPartitionOrder extends Order[TopicPartition] {
     override def compare(x: TopicPartition, y: TopicPartition): Int = x.hashCode().compareTo(y.hashCode())
@@ -50,7 +51,7 @@ abstract class TestContext[F[_]](implicit F: Async[F]) extends KafkaSpecBase[F] 
   val testTopic2          = "load-state-topic-2"
   val testTopicPartitions = 5
 
-  val consumerSettings: ConsumerSettings[F, String, String] =
+  implicit def consumerSettings(implicit kafkaConfig: EmbeddedKafkaConfig): ConsumerSettings[F, String, String] =
     ConsumerSettings[F, String, String]
       .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
       .withAutoOffsetReset(AutoOffsetReset.Earliest)
@@ -60,7 +61,7 @@ abstract class TestContext[F[_]](implicit F: Async[F]) extends KafkaSpecBase[F] 
       topics: NonEmptyList[String],
       partitions: Int = testTopicPartitions,
       topicConfig: Map[String, String] = Map.empty
-  ): F[NonEmptySet[TopicPartition]] =
+  )(implicit kafkaConfig: EmbeddedKafkaConfig): F[NonEmptySet[TopicPartition]] =
     F.delay(topics.flatMap { topic =>
       createCustomTopic(topic = topic, topicConfig = topicConfig, partitions = partitions)
       NonEmptyList.fromListUnsafe((0 until partitions).toList).map(i => new TopicPartition(topic, i))
@@ -83,7 +84,7 @@ abstract class TestContext[F[_]](implicit F: Async[F]) extends KafkaSpecBase[F] 
   def publishToKafkaAndTriggerCompaction(
       partitions: NonEmptySet[TopicPartition],
       messages: Seq[(String, String)]
-  ): F[Unit] = {
+  )(implicit kafkaConfig: EmbeddedKafkaConfig): F[Unit] = {
     val topic      = partitions.map(_.topic()).toList.head
     val fillerSize = 20
     val filler     = List.fill(fillerSize)(UUID.randomUUID().toString).map(x => (x, x))
@@ -91,16 +92,15 @@ abstract class TestContext[F[_]](implicit F: Async[F]) extends KafkaSpecBase[F] 
     publishStringMessages(topic, messages) *> publishStringMessages(topic, filler)
   }
 
-  def runLoader[T](
+  def runLoader(
       topics: NonEmptyList[String],
-      strategy: LoadTopicStrategy,
-      consumerSettings: ConsumerSettings[F, String, String] = consumerSettings
-  )(f: F[List[(String, String)]] => F[T]): F[T] =
-    f(TopicLoader.load(topics, strategy, consumerSettings).compile.toList.map(_.map(recordToTuple)))
-}
+      strategy: LoadTopicStrategy
+  )(implicit consumerSettings: ConsumerSettings[F, String, String]): F[List[(String, String)]] =
+    TopicLoader.load(topics, strategy, consumerSettings).compile.toList.map(_.map(recordToTuple))
 
-abstract class TestConsumer[F[_]](implicit F: Async[F]) extends TestContext[F] {
-  def moveOffsetToEnd(partitions: NonEmptySet[TopicPartition]): Stream[F, KafkaConsumer[F, String, String]] =
+  def moveOffsetToEnd(
+      partitions: NonEmptySet[TopicPartition]
+  )(implicit kafkaConfig: EmbeddedKafkaConfig): Stream[F, KafkaConsumer[F, String, String]] =
     withAssignedConsumer(
       autoCommit = true,
       offsetReset = AutoOffsetReset.Latest,
@@ -118,12 +118,12 @@ abstract class TestConsumer[F[_]](implicit F: Async[F]) extends TestContext[F] {
   def publishToKafkaAndWaitForCompaction(
       partitions: NonEmptySet[TopicPartition],
       messages: Seq[(String, String)]
-  ): F[Unit] = for {
+  )(implicit kafkaConfig: EmbeddedKafkaConfig): F[Unit] = for {
     _ <- publishToKafkaAndTriggerCompaction(partitions, messages)
     _ <- waitForCompaction(partitions)
   } yield ()
 
-  def waitForCompaction(partitions: NonEmptySet[TopicPartition]): F[Unit] =
+  def waitForCompaction(partitions: NonEmptySet[TopicPartition])(implicit kafkaConfig: EmbeddedKafkaConfig): F[Unit] =
     consumeEventually(partitions) { r =>
       for {
         records    <- r
@@ -139,7 +139,7 @@ abstract class TestConsumer[F[_]](implicit F: Async[F]) extends TestContext[F] {
       groupId: String = UUID.randomUUID().toString
   )(
       f: F[List[(String, String)]] => F[Unit]
-  ): F[Unit] =
+  )(implicit kafkaConfig: EmbeddedKafkaConfig): F[Unit] =
     retry(
       fa = {
         val records = withAssignedConsumer[F[List[ConsumerRecord[String, String]]]](
@@ -166,7 +166,7 @@ abstract class TestConsumer[F[_]](implicit F: Async[F]) extends TestContext[F] {
       offsetReset: AutoOffsetReset,
       partitions: NonEmptySet[TopicPartition],
       groupId: Option[String] = None
-  )(f: Stream[F, KafkaConsumer[F, String, String]] => T): T = {
+  )(f: Stream[F, KafkaConsumer[F, String, String]] => T)(implicit kafkaConfig: EmbeddedKafkaConfig): T = {
     val consumer = createConsumer(autoCommit, offsetReset, groupId)
 
     val stream = Stream
@@ -185,7 +185,7 @@ abstract class TestConsumer[F[_]](implicit F: Async[F]) extends TestContext[F] {
       autoCommit: Boolean,
       offsetReset: AutoOffsetReset,
       groupId: Option[String]
-  ): Resource[F, KafkaConsumer[F, String, String]] = {
+  )(implicit kafkaConfig: EmbeddedKafkaConfig): Resource[F, KafkaConsumer[F, String, String]] = {
     val baseSettings =
       ConsumerSettings[F, String, String]
         .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
@@ -202,4 +202,9 @@ abstract class TestConsumer[F[_]](implicit F: Async[F]) extends TestContext[F] {
       fa handleErrorWith { _ =>
         F.sleep(delay) *> retry(fa, delay, max - 1)
       }
+}
+
+trait TestContext {
+  implicit lazy val kafkaConfig: EmbeddedKafkaConfig =
+    EmbeddedKafkaConfig(kafkaPort = RandomPort(), zooKeeperPort = RandomPort(), Map("log.roll.ms" -> "10"))
 }
