@@ -1,54 +1,48 @@
 package integration
 
-import base.{AsyncIntSpecBase, KafkaSpecBase}
+import base.KafkaSpecBase
 import cats.data.NonEmptyList
 import cats.effect.{Async, IO, Ref}
 import cats.syntax.all.*
 import fs2.kafka.*
+import io.github.embeddedkafka.EmbeddedKafkaConfig
 import load.LoadExample
+import org.scalatest.Assertion
 import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.slf4j.Slf4jFactory
+import utils.RandomPort
 
 import scala.concurrent.duration.*
 
 class LoadExampleIntSpec extends KafkaSpecBase[IO] {
 
-
   "LoadExample" should {
-    "load previously seen messages into the store" in {
-      object testContext extends TestContext[IO]
-      import testContext.*
+    "load previously seen messages into the store" in withContext { ctx =>
+      import ctx.*
 
-      embeddedKafka.use { _ =>
-        for {
-          _         <- publishStringMessage(inputTopic, "key1", "value1")
-          _         <- runAppAndDiscard()
-          _         <- publishStringMessage(inputTopic, "key2", "value2")
-          assertion <- runApp { result =>
-                         result.asserting(_ should contain theSameElementsInOrderAs List("value1", "value2"))
-                       }
-        } yield assertion
-      }
+      for {
+        _      <- publishStringMessage(inputTopic, "key1", "value1")
+        _      <- runAppAndDiscard()
+        _      <- publishStringMessage(inputTopic, "key2", "value2")
+        result <- runApp()
+      } yield result should contain theSameElementsInOrderAs List("value1", "value2")
     }
 
-    "not publish previously committed messages" in {
-      object testContext extends TestContext[IO]
-      import testContext.*
+    "not publish previously committed messages" in withContext { ctx =>
+      import ctx.*
 
-      embeddedKafka.use { _ =>
-        for {
-          _         <- publishStringMessage(inputTopic, "key1", "value1")
-          _         <- runAppAndDiscard()
-          _         <- consumeStringMessage(outputTopic, autoCommit = true)
-          _         <- publishStringMessage(inputTopic, "key2", "value2")
-          _         <- runAppAndDiscard()
-          assertion <- consumeStringMessage(outputTopic, autoCommit = true).asserting(_ shouldBe "value2")
-        } yield assertion
-      }
+      for {
+        _      <- publishStringMessage(inputTopic, "key1", "value1")
+        _      <- runAppAndDiscard()
+        _      <- consumeStringMessage(outputTopic, autoCommit = true)
+        _      <- publishStringMessage(inputTopic, "key2", "value2")
+        _      <- runAppAndDiscard()
+        result <- consumeStringMessage(outputTopic, autoCommit = true)
+      } yield result shouldBe "value2"
     }
   }
 
-  private abstract class TestContext[F[_] : Async] extends KafkaSpecBase[IO] {
+  private abstract class TestContext[F[_] : Async] {
     val inputTopic  = "test-topic-1"
     val outputTopic = "output-topic-1"
 
@@ -57,6 +51,9 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
     private implicit val loggerFactory: LoggerFactory[F] = Slf4jFactory.create[F]
 
     private val timeout = 10.seconds
+
+    implicit val kafkaConfig: EmbeddedKafkaConfig =
+      EmbeddedKafkaConfig(kafkaPort = RandomPort(), zooKeeperPort = RandomPort(), Map("log.roll.ms" -> "10"))
 
     private val consumerSettings: ConsumerSettings[F, String, String] =
       ConsumerSettings[F, String, String]
@@ -68,8 +65,8 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
       ProducerSettings[F, String, String]
         .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
 
-    def runApp[T](f: F[List[String]] => F[T]): F[T] = {
-      val storeState = for {
+    def runApp(): F[List[String]] =
+      for {
         store   <- store
         example1 =
           LoadExample.kafka[F](
@@ -82,9 +79,12 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
         stored  <- example1.stream.interruptAfter(timeout).compile.drain *> store.get
       } yield stored
 
-      f(storeState)
-    }
+    def runAppAndDiscard(): F[Unit] = runApp().void
+  }
 
-    def runAppAndDiscard(): F[Unit] = runApp(identity).void
+  private def withContext(testCode: TestContext[IO] => IO[Assertion])(implicit F: Async[IO]): IO[Assertion] = {
+    object testContext extends TestContext[IO]
+    import testContext.*
+    embeddedKafka.use(_ => testCode(testContext))
   }
 }

@@ -5,4 +5,4 @@ import org.scalatest.OptionValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
 
-trait AsyncIntSpecBase extends AsyncWordSpec with AsyncIOSpec with Matchers with OptionValues
+trait AsyncIntSpec extends AsyncWordSpec with AsyncIOSpec with Matchers with OptionValues
