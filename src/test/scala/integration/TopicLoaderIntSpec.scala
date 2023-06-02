@@ -99,14 +99,6 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
       }
     }
 
-    /*
-    TODO - Property testing doesn't work very well, even when using scalacheck-effect.
-     Basically cats-effect-testing expects an IO[Assertion] but the `check()` from a PropF from scalacheck-effect returns
-     a Future[TestResult].
-     So we'd have to map on the Future and match on the inner TestResult returning a new assertion depending on if the
-     match was a success or not.
-     See this thread: https://github.com/typelevel/scalacheck-effect/issues/261
-     */
     "using any strategy" when {
 
       "strategy is LoadAll" should {
@@ -142,7 +134,6 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
         val strategy = LoadCommitted
 
-        // TODO - duplicate test - see above
         "complete successfully if the topic is empty" in withContext { ctx =>
           import ctx.*
 
@@ -153,7 +144,6 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
           } yield result shouldBe empty
         }
 
-        // TODO - duplicate test - see above
         "read partitions that have been compacted" in withContext { ctx =>
           import ctx.*
 
