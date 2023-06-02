@@ -19,7 +19,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
     "using LoadAll strategy" should {
 
       val strategy = LoadAll
-      "stream all records from all topics" in withContext { ctx =>
+      "stream all records from all topics" in withKafkaContext { ctx =>
         import ctx.*
 
         val topics                 = NonEmptyList.of(testTopic1, testTopic2)
@@ -33,7 +33,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         } yield result should contain theSameElementsAs (forTopic1 ++ forTopic2)
       }
 
-      "stream available records even when one topic is empty" in withContext { ctx =>
+      "stream available records even when one topic is empty" in withKafkaContext { ctx =>
         import ctx.*
 
         val topics    = NonEmptyList.of(testTopic1, testTopic2)
@@ -53,7 +53,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
       val strategy = LoadCommitted
 
-      "stream all records up to the committed offset with LoadCommitted strategy" in withContext { ctx =>
+      "stream all records up to the committed offset with LoadCommitted strategy" in withKafkaContext { ctx =>
         import ctx.*
 
         val topics                    = NonEmptyList.one(testTopic1)
@@ -68,7 +68,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         } yield result should contain theSameElementsAs committed
       }
 
-      "stream available records even when one topic is empty" in withContext { ctx =>
+      "stream available records even when one topic is empty" in withKafkaContext { ctx =>
         import ctx.*
 
         val topics    = NonEmptyList.of(testTopic1, testTopic2)
@@ -82,20 +82,21 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         } yield result should contain theSameElementsAs published
       }
 
-      "work when highest offset is missing in log and there are messages after highest offset" in withContext { ctx =>
-        import ctx.*
+      "work when highest offset is missing in log and there are messages after highest offset" in withKafkaContext {
+        ctx =>
+          import ctx.*
 
-        val published                 = records(1 to 10)
-        val (notUpdated, toBeUpdated) = published.splitAt(5)
+          val published                 = records(1 to 10)
+          val (notUpdated, toBeUpdated) = published.splitAt(5)
 
-        for {
-          partitions <-
-            createCustomTopics(NonEmptyList.one(testTopic1), partitions = 1, topicConfig = aggressiveCompactionConfig)
-          _          <- publishStringMessages(testTopic1, published)
-          _          <- moveOffsetToEnd(partitions).compile.drain
-          _          <- publishToKafkaAndWaitForCompaction(partitions, toBeUpdated.map { case (k, v) => (k, v.reverse) })
-          result     <- runLoader(NonEmptyList.one(testTopic1), strategy)
-        } yield result should contain theSameElementsAs notUpdated
+          for {
+            partitions <-
+              createCustomTopics(NonEmptyList.one(testTopic1), partitions = 1, topicConfig = aggressiveCompactionConfig)
+            _          <- publishStringMessages(testTopic1, published)
+            _          <- moveOffsetToEnd(partitions).compile.drain
+            _          <- publishToKafkaAndWaitForCompaction(partitions, toBeUpdated.map { case (k, v) => (k, v.reverse) })
+            result     <- runLoader(NonEmptyList.one(testTopic1), strategy)
+          } yield result should contain theSameElementsAs notUpdated
       }
     }
 
@@ -105,7 +106,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
         val strategy = LoadAll
 
-        "complete successfully if the topic is empty" in withContext { ctx =>
+        "complete successfully if the topic is empty" in withKafkaContext { ctx =>
           import ctx.*
 
           val topics = NonEmptyList.one(testTopic1)
@@ -115,7 +116,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
           } yield result shouldBe empty
         }
 
-        "read partitions that have been compacted" in withContext { ctx =>
+        "read partitions that have been compacted" in withKafkaContext { ctx =>
           import ctx.*
 
           val published        = records(1 to 10)
@@ -134,7 +135,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
         val strategy = LoadCommitted
 
-        "complete successfully if the topic is empty" in withContext { ctx =>
+        "complete successfully if the topic is empty" in withKafkaContext { ctx =>
           import ctx.*
 
           val topics = NonEmptyList.one(testTopic1)
@@ -144,7 +145,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
           } yield result shouldBe empty
         }
 
-        "read partitions that have been compacted" in withContext { ctx =>
+        "read partitions that have been compacted" in withKafkaContext { ctx =>
           import ctx.*
 
           val published        = records(1 to 10)
@@ -163,7 +164,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
     "Kafka is misbehaving" should {
 
-      "fail if unavailable at startup" in withContext { _ =>
+      "fail if unavailable at startup" in withKafkaContext { _ =>
         val badConsumerSettings = ConsumerSettings[IO, String, String]
           .withBootstrapServers("localhost:6001")
           .withAutoOffsetReset(AutoOffsetReset.Earliest)
@@ -193,9 +194,9 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
       EmbeddedKafkaConfig(kafkaPort = RandomPort(), zooKeeperPort = RandomPort(), Map("log.roll.ms" -> "10"))
   }
 
-  private def withContext(testCode: TestContext[IO] => IO[Assertion])(implicit F: Async[IO]): IO[Assertion] = {
+  private def withKafkaContext(test: TestContext[IO] => IO[Assertion])(implicit F: Async[IO]): IO[Assertion] = {
     object testContext extends TestContext[IO]
     import testContext.*
-    embeddedKafka.use(_ => testCode(testContext))
+    embeddedKafka.use(_ => test(testContext))
   }
 }

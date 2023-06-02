@@ -17,7 +17,7 @@ import scala.concurrent.duration.*
 class LoadExampleIntSpec extends KafkaSpecBase[IO] {
 
   "LoadExample" should {
-    "load previously seen messages into the store" in withContext { ctx =>
+    "load previously seen messages into the store" in withKafkaContext { ctx =>
       import ctx.*
 
       for {
@@ -28,7 +28,7 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
       } yield result should contain theSameElementsInOrderAs List("value1", "value2")
     }
 
-    "not publish previously committed messages" in withContext { ctx =>
+    "not publish previously committed messages" in withKafkaContext { ctx =>
       import ctx.*
 
       for {
@@ -82,9 +82,9 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
     def runAppAndDiscard(): F[Unit] = runApp().void
   }
 
-  private def withContext(testCode: TestContext[IO] => IO[Assertion])(implicit F: Async[IO]): IO[Assertion] = {
+  private def withKafkaContext(test: TestContext[IO] => IO[Assertion])(implicit F: Async[IO]): IO[Assertion] = {
     object testContext extends TestContext[IO]
     import testContext.*
-    embeddedKafka.use(_ => testCode(testContext))
+    embeddedKafka.use(_ => test(testContext))
   }
 }
