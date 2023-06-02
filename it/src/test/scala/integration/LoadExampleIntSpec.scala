@@ -80,7 +80,7 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
     val runAppAndDiscard: F[Unit] = runApp.void
   }
 
-  private def withKafkaContext(test: TestContext[IO] => IO[Assertion])(implicit F: Async[IO]): IO[Assertion] = {
+  private def withKafkaContext(test: TestContext[IO] => IO[Assertion]): IO[Assertion] = {
     object testContext extends TestContext[IO]
     import testContext.*
     embeddedKafka.use(_ => test(testContext))
