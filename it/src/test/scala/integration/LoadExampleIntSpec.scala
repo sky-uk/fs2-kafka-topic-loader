@@ -15,6 +15,9 @@ import utils.RandomPort
 import scala.concurrent.duration.*
 
 class LoadExampleIntSpec extends KafkaSpecBase[IO] {
+  val inputTopic      = "test-topic-1"
+  val outputTopic     = "output-topic-1"
+  private val timeout = 10.seconds
 
   "LoadExample" should {
     "load previously seen messages into the store" in withKafkaContext { ctx =>
@@ -22,9 +25,9 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
 
       for {
         _      <- publishStringMessage(inputTopic, "key1", "value1")
-        _      <- runAppAndDiscard()
+        _      <- runAppAndDiscard
         _      <- publishStringMessage(inputTopic, "key2", "value2")
-        result <- runApp()
+        result <- runApp
       } yield result should contain theSameElementsInOrderAs List("value1", "value2")
     }
 
@@ -33,24 +36,19 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
 
       for {
         _      <- publishStringMessage(inputTopic, "key1", "value1")
-        _      <- runAppAndDiscard()
+        _      <- runAppAndDiscard
         _      <- consumeStringMessage(outputTopic, autoCommit = true)
         _      <- publishStringMessage(inputTopic, "key2", "value2")
-        _      <- runAppAndDiscard()
+        _      <- runAppAndDiscard
         result <- consumeStringMessage(outputTopic, autoCommit = true)
       } yield result shouldBe "value2"
     }
   }
 
   private abstract class TestContext[F[_] : Async] {
-    val inputTopic  = "test-topic-1"
-    val outputTopic = "output-topic-1"
-
     private val store: F[Ref[F, List[String]]] = Ref[F].of(List.empty)
 
     private implicit val loggerFactory: LoggerFactory[F] = Slf4jFactory.create[F]
-
-    private val timeout = 10.seconds
 
     implicit val kafkaConfig: EmbeddedKafkaConfig =
       EmbeddedKafkaConfig(kafkaPort = RandomPort(), zooKeeperPort = RandomPort(), Map("log.roll.ms" -> "10"))
@@ -65,7 +63,7 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
       ProducerSettings[F, String, String]
         .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
 
-    def runApp(): F[List[String]] =
+    val runApp: F[List[String]] =
       for {
         store   <- store
         example1 =
@@ -79,7 +77,7 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
         stored  <- example1.stream.interruptAfter(timeout).compile.drain *> store.get
       } yield stored
 
-    def runAppAndDiscard(): F[Unit] = runApp().void
+    val runAppAndDiscard: F[Unit] = runApp.void
   }
 
   private def withKafkaContext(test: TestContext[IO] => IO[Assertion])(implicit F: Async[IO]): IO[Assertion] = {

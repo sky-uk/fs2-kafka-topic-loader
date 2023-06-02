@@ -1,9 +1,9 @@
 package uk.sky.fs2.kafka.topicloader
 
-import cats.Monad
 import cats.data.{NonEmptyList, NonEmptyMap, OptionT}
 import cats.effect.Async
 import cats.syntax.all.*
+import cats.{Monad, Order}
 import fs2.kafka.{ConsumerRecord, ConsumerSettings, KafkaConsumer}
 import fs2.{Pipe, Stream}
 import org.apache.kafka.common.TopicPartition
@@ -19,9 +19,10 @@ object TopicLoader extends TopicLoader {
       consumerRecord: Option[ConsumerRecord[K, V]] = none[ConsumerRecord[K, V]]
   )
 
-  private implicit object TopicPartitionOrdering extends Ordering[TopicPartition] {
-    override def compare(x: TopicPartition, y: TopicPartition): Int = x.hashCode().compareTo(y.hashCode())
-  }
+  implicit val topicPartitionOrdering: Ordering[TopicPartition] = (x: TopicPartition, y: TopicPartition) =>
+    x.hashCode().compareTo(y.hashCode())
+
+  implicit val topicPartitionOrder: Order[TopicPartition] = Order.fromOrdering[TopicPartition]
 
   private object WithRecord {
     def unapply[K, V](h: HighestOffsetsWithRecord[K, V]): Option[ConsumerRecord[K, V]] = h.consumerRecord
