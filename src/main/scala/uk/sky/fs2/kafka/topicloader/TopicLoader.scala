@@ -58,7 +58,7 @@ trait TopicLoader {
 
   def loadAndRun(): Unit = ()
 
-  protected def filterBelowHighestOffset[F[_] : Monad : LoggerFactory, K, V](
+  private def filterBelowHighestOffset[F[_] : Monad : LoggerFactory, K, V](
       logOffsets: NonEmptyMap[TopicPartition, LogOffsets]
   ): Pipe[F, ConsumerRecord[K, V], ConsumerRecord[K, V]] = {
     val allHighestOffsets: HighestOffsetsWithRecord[K, V] =
@@ -69,7 +69,7 @@ trait TopicLoader {
       .collect { case WithRecord(r) => r }
   }
 
-  protected def logOffsetsForTopics[F[_] : Async, K, V](
+  private def logOffsetsForTopics[F[_] : Async, K, V](
       topics: NonEmptyList[String],
       strategy: LoadTopicStrategy,
       consumer: KafkaConsumer[F, K, V]
@@ -86,7 +86,7 @@ trait TopicLoader {
     _                <- consumer.unsubscribe
   } yield logOffsets.filter { case (_, o) => o.highest > o.lowest }
 
-  protected def earliestOffsets[F[_] : Monad, K, V](
+  private def earliestOffsets[F[_] : Monad, K, V](
       consumer: KafkaConsumer[F, K, V],
       beginningOffsets: Map[TopicPartition, Long]
   ): F[Map[TopicPartition, Long]] =
