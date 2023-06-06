@@ -74,16 +74,18 @@ trait TopicLoader {
       strategy: LoadTopicStrategy,
       consumer: KafkaConsumer[F, K, V]
   ): F[Map[TopicPartition, LogOffsets]] = for {
-    _                <- consumer.subscribe(topics)
-    partitionInfo    <- topics.toList.flatTraverse(consumer.partitionsFor)
-    topicPartitions   = partitionInfo.map(pi => new TopicPartition(pi.topic, pi.partition)).toSet
-    beginningOffsets <- consumer.beginningOffsets(topicPartitions)
-    endOffsets       <- strategy match {
-                          case LoadAll       => consumer.endOffsets(topicPartitions)
-                          case LoadCommitted => earliestOffsets(consumer, beginningOffsets)
-                        }
-    logOffsets        = beginningOffsets.map { case (k, v) => k -> LogOffsets(v, endOffsets(k)) }
-    _                <- consumer.unsubscribe
+    _                           <- consumer.subscribe(topics)
+    partitionInfo               <- topics.toList.flatTraverse(consumer.partitionsFor)
+    topicPartitions              = partitionInfo.map(pi => new TopicPartition(pi.topic, pi.partition)).toSet
+    beginningOffsetPerPartition <- consumer.beginningOffsets(topicPartitions)
+    endOffsets                  <- strategy match {
+                                     case LoadAll       => consumer.endOffsets(topicPartitions)
+                                     case LoadCommitted => earliestOffsets(consumer, beginningOffsetPerPartition)
+                                   }
+    logOffsets                   = beginningOffsetPerPartition.map { case (partition, offset) =>
+                                     partition -> LogOffsets(offset, endOffsets(partition))
+                                   }
+    _                           <- consumer.unsubscribe
   } yield logOffsets.filter { case (_, o) => o.highest > o.lowest }
 
   private def earliestOffsets[F[_] : Monad, K, V](
