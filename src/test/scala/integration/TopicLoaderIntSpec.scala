@@ -71,15 +71,16 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
       "stream available records even when one topic is empty" in withKafkaContext { ctx =>
         import ctx.*
 
-        val topics    = NonEmptyList.of(testTopic1, testTopic2)
-        val published = records(1 to 15)
+        val topics                    = NonEmptyList.of(testTopic1, testTopic2)
+        val (committed, notCommitted) = records(1 to 15).splitAt(10)
 
         for {
           partitions <- createCustomTopics(topics)
-          _          <- publishStringMessages(testTopic1, published)
+          _          <- publishStringMessages(testTopic1, committed)
           _          <- moveOffsetToEnd(partitions).compile.drain
+          _          <- publishStringMessages(testTopic1, notCommitted)
           result     <- runLoader(topics, strategy)
-        } yield result should contain theSameElementsAs published
+        } yield result should contain theSameElementsAs committed
       }
 
       "work when highest offset is missing in log and there are messages after highest offset" in withKafkaContext {
