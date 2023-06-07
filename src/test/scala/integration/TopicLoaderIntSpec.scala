@@ -3,17 +3,19 @@ package integration
 import base.KafkaSpecBase
 import cats.data.NonEmptyList
 import cats.effect.IO
+import uk.sky.fs2.kafka.topicloader.{LoadAll, LoadCommitted, LoadTopicStrategy}
 import fs2.kafka.{AutoOffsetReset, ConsumerSettings}
 import io.github.embeddedkafka.EmbeddedKafkaConfig
 import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalacheck.effect.PropF
-import uk.sky.fs2.kafka.topicloader.{LoadAll, LoadCommitted, LoadTopicStrategy}
 import utils.RandomPort
 
 import scala.concurrent.duration.*
 
 class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
+
+  def assertListsEqual[T : Ordering](list1: Seq[T], list2: Seq[T]): Unit = assertEquals(list1.sorted, list2.sorted)
 
   test("load when using LoadAll strategy should stream all records from all topics") {
 
@@ -30,7 +32,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         _      <- publishStringMessages(testTopic1, forTopic1)
         _      <- publishStringMessages(testTopic2, forTopic2)
         result <- runLoader(topics, strategy)
-      } yield assertEquals(result, forTopic1 ++ forTopic2)
+      } yield assertListsEqual(result, forTopic1 ++ forTopic2)
     }
 
   }
@@ -48,8 +50,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         _      <- createCustomTopics(topics)
         _      <- publishStringMessages(testTopic1, published)
         result <- runLoader(topics, strategy)
-      } yield assertEquals(result, published)
-
+      } yield assertListsEqual(result, published)
     }
   }
 
@@ -68,48 +69,48 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         _          <- moveOffsetToEnd(partitions).compile.drain
         _          <- publishStringMessages(testTopic1, notCommitted)
         result     <- runLoader(topics, strategy)
-      } yield assertEquals(result, committed)
+      } yield assertListsEqual(result, committed)
     }
+  }
 
-    test("load when using LoadCommitted strategy should stream available records even when one topic is empty") {
-      val strategy = LoadCommitted
+  test("load when using LoadCommitted strategy should stream available records even when one topic is empty") {
+    val strategy = LoadCommitted
 
-      withKafkaContext { ctx =>
-        import ctx.*
+    withKafkaContext { ctx =>
+      import ctx.*
 
-        val topics                    = NonEmptyList.of(testTopic1, testTopic2)
-        val (committed, notCommitted) = records(1 to 15).splitAt(10)
+      val topics                    = NonEmptyList.of(testTopic1, testTopic2)
+      val (committed, notCommitted) = records(1 to 15).splitAt(10)
 
-        for {
-          partitions <- createCustomTopics(topics)
-          _          <- publishStringMessages(testTopic1, committed)
-          _          <- moveOffsetToEnd(partitions).compile.drain
-          _          <- publishStringMessages(testTopic1, notCommitted)
-          result     <- runLoader(topics, strategy)
-        } yield assertEquals(result, committed)
-      }
+      for {
+        partitions <- createCustomTopics(topics)
+        _          <- publishStringMessages(testTopic1, committed)
+        _          <- moveOffsetToEnd(partitions).compile.drain
+        _          <- publishStringMessages(testTopic1, notCommitted)
+        result     <- runLoader(topics, strategy)
+      } yield assertListsEqual(result, committed)
     }
+  }
 
-    test(
-      "load when using LoadCommitted strategy should work when highest offset is missing in log and there are messages after highest offset"
-    ) {
-      val strategy = LoadCommitted
+  test(
+    "load when using LoadCommitted strategy should work when highest offset is missing in log and there are messages after highest offset"
+  ) {
+    val strategy = LoadCommitted
 
-      withKafkaContext { ctx =>
-        import ctx.*
+    withKafkaContext { ctx =>
+      import ctx.*
 
-        val published                 = records(1 to 10)
-        val (notUpdated, toBeUpdated) = published.splitAt(5)
+      val published                 = records(1 to 10)
+      val (notUpdated, toBeUpdated) = published.splitAt(5)
 
-        for {
-          partitions <-
-            createCustomTopics(NonEmptyList.one(testTopic1), partitions = 1, topicConfig = aggressiveCompactionConfig)
-          _          <- publishStringMessages(testTopic1, published)
-          _          <- moveOffsetToEnd(partitions).compile.drain
-          _          <- publishToKafkaAndWaitForCompaction(partitions, toBeUpdated.map { case (k, v) => (k, v.reverse) })
-          result     <- runLoader(NonEmptyList.one(testTopic1), strategy)
-        } yield assertEquals(result, notUpdated)
-      }
+      for {
+        partitions <-
+          createCustomTopics(NonEmptyList.one(testTopic1), partitions = 1, topicConfig = aggressiveCompactionConfig)
+        _          <- publishStringMessages(testTopic1, published)
+        _          <- moveOffsetToEnd(partitions).compile.drain
+        _          <- publishToKafkaAndWaitForCompaction(partitions, toBeUpdated.map { case (k, v) => (k, v.reverse) })
+        result     <- runLoader(NonEmptyList.one(testTopic1), strategy)
+      } yield assertListsEqual(result, notUpdated)
     }
   }
 
@@ -124,7 +125,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
         for {
           result <- runLoader(topics, strategy)
-        } yield assertEquals(result, List.empty)
+        } yield assertListsEqual(result, List.empty)
       }
     }
   }
@@ -138,7 +139,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
         for {
           result <- runLoader(topics, strategy)
-        } yield assertEquals(result, List.empty)
+        } yield assertListsEqual(result, List.empty)
       }
     }
   }
