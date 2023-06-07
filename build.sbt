@@ -1,6 +1,6 @@
 import Dependencies.*
 
-lazy val scala3                 = "3.2.2"
+lazy val scala3                 = "3.3.0"
 lazy val scala213               = "2.13.10"
 lazy val supportedScalaVersions = List(scala3, scala213)
 lazy val scmUrl                 = "https://github.com/sky-uk/fs2-kafka-topic-loader"
@@ -8,6 +8,15 @@ lazy val scmUrl                 = "https://github.com/sky-uk/fs2-kafka-topic-loa
 ThisBuild / organization := "uk.sky"
 ThisBuild / description  := "Read the contents of provided Kafka topics"
 ThisBuild / licenses     := List("BSD New" -> url("https://opensource.org/licenses/BSD-3-Clause"))
+ThisBuild / homepage     := Some(url(scmUrl))
+ThisBuild / developers   := List(
+  Developer(
+    "Sky UK OSS",
+    "Sky UK OSS",
+    sys.env.getOrElse("SONATYPE_EMAIL", scmUrl),
+    url(scmUrl)
+  )
+)
 
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
@@ -39,17 +48,7 @@ lazy val it = (project in file("it"))
   .settings(
     name         := "integration-test",
     scalaVersion := scala213,
-    publish      := false,
-    libraryDependencies ++= Seq(
-      Cats.core,
-      Cats.effect,
-      Fs2.core,
-      Fs2.kafka,
-      embeddedKafka,
-      scalaTest,
-      catsEffectTesting,
-      logbackClassic
-    )
+    publish      := false
   )
   .dependsOn(root % "test->test;compile->compile")
 
@@ -65,13 +64,6 @@ ThisBuild / scalafixConfig := {
   CrossVersion.partialVersion(scalaVersion.value) match {
     case Some((3, _)) => Some((ThisBuild / baseDirectory).value / ".scalafix3.conf")
     case _            => None
-  }
-}
-
-ThisBuild / excludeDependencies ++= {
-  CrossVersion.partialVersion(scalaVersion.value) match {
-    case Some((3, _)) => Dependencies.scala3Exclusions
-    case _            => Seq.empty
   }
 }
 
