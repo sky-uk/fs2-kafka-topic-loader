@@ -1,8 +1,5 @@
 package base
 
-import cats.effect.testing.scalatest.AsyncIOSpec
-import org.scalatest.OptionValues
-import org.scalatest.matchers.should.Matchers
-import org.scalatest.wordspec.AsyncWordSpec
+import munit.{CatsEffectSuite, ScalaCheckEffectSuite}
 
-trait AsyncIntSpec extends AsyncWordSpec with AsyncIOSpec with Matchers with OptionValues
+trait AsyncIntSpec extends CatsEffectSuite with ScalaCheckEffectSuite

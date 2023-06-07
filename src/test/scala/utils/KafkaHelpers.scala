@@ -9,7 +9,6 @@ import fs2.Stream
 import fs2.kafka.{AutoOffsetReset, ConsumerRecord, ConsumerSettings, KafkaConsumer}
 import io.github.embeddedkafka.EmbeddedKafkaConfig
 import org.apache.kafka.common.TopicPartition
-import org.scalatest.exceptions.TestFailedException
 import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.slf4j.Slf4jFactory
 import uk.sky.fs2.kafka.topicloader.{LoadTopicStrategy, TopicLoader}
@@ -60,9 +59,9 @@ trait KafkaHelpers[F[_]] {
   def runLoader(
       topics: NonEmptyList[String],
       strategy: LoadTopicStrategy
-  )(implicit consumerSettings: ConsumerSettings[F, String, String], F: Async[F]): F[List[(String, String)]] = {
+  )(implicit consumerSettings: ConsumerSettings[F, String, String], F: Async[F]): F[Seq[(String, String)]] = {
     implicit val loggerFactory: LoggerFactory[F] = Slf4jFactory.create[F]
-    TopicLoader.load(topics, strategy, consumerSettings).compile.toList.map(_.map(recordToTuple))
+    TopicLoader.load(topics, strategy, consumerSettings).compile.toList.map(_.map(recordToTuple).toSeq)
   }
 
   def moveOffsetToEnd(
@@ -99,7 +98,7 @@ trait KafkaHelpers[F[_]] {
         messageKeys = records.map { case (k, _) => k }
         result     <-
           if (messageKeys.sorted == messageKeys.toSet.toList.sorted) F.unit
-          else F.raiseError(new TestFailedException("Topic has not compacted within timeout", 1))
+          else F.raiseError(new IllegalStateException("Topic has not compacted within timeout"))
       } yield result
     }
 

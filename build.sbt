@@ -11,8 +11,9 @@ ThisBuild / licenses     := List("BSD New" -> url("https://opensource.org/licens
 
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
-
 ThisBuild / scalafixDependencies += Dependencies.Plugins.organizeImports
+
+ThisBuild / testFrameworks += new TestFramework("munit.Framework")
 
 tpolecatScalacOptions ++= Set(ScalacOptions.source3)
 
@@ -29,8 +30,8 @@ lazy val root = (project in file("."))
       Fs2.core,
       Fs2.kafka,
       embeddedKafka,
-      scalaTest,
-      catsEffectTesting,
+      munitCatsEffect,
+      munitCatsEffectScalacheck,
       logbackClassic
     )
   )
