@@ -5,6 +5,13 @@ Reads the contents of provided Kafka topics determined by the `LoadTopicStrategy
 - `LoadAll` - reads the topics in their entirety
 - `LoadCommitted` - reads up to the configured consumer-group's last committed Offset
 
+This library is aimed for usage in applications that want a deterministic stream of Kafka messages that completes once
+the last message (determined above) has been read. This is useful if an application shouldn't respond to new events
+before it has processed all previously seen messages, or if Kafka is being used as a data store and the entire contents
+of a topic needs to be reloaded on an application restart.
+
+## Usage
+
 Add the following to your `build.sbt`:
 
 ```scala
