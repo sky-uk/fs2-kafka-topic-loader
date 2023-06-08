@@ -24,7 +24,7 @@ The project is built and released for Scala versions 2.13 and 3. To compile and 
 
 >**Note**
 > 
-> the `sbt-ci-release` plugin detects it is a snapshot release uses [sbt-dynver](https://github.com/dwijnand/sbt-dynver) versioning.
+> `sbt-ci-release` determines the Snapshot version using [`sbt-dynver`](https://github.com/dwijnand/sbt-dynver).
 
 ### Stable release
 
