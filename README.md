@@ -1,6 +1,6 @@
 # fs2-kafka-topic-loader
 
-Reads the contents of provided Kafka topics, in one of two ways determined by the `LoadTopicStrategy`.
+Reads the contents of provided Kafka topics determined by the `LoadTopicStrategy`.
 
 - `LoadAll` - reads the topics in their entirety
 - `LoadCommitted` - reads up to the configured consumer-group's last committed Offset
