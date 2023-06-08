@@ -34,7 +34,7 @@ The project is built and released for Scala versions 2.13 and 3. To compile and 
 
 >**Warning**
 > 
-> 💡 The release tag **must** start with a `v` followed by the version, e.g. `v1.0.0` for sbt-ci-release to work
+> The release tag **must** start with a `v` followed by the version, e.g. `v1.0.0` for sbt-ci-release to work
 
 ## Contributor Code of Conduct
 
