@@ -65,6 +65,14 @@ trait KafkaHelpers[F[_]] {
     TopicLoader.load(topics, strategy, consumerSettings).compile.toList.map(_.map(recordToTuple))
   }
 
+  def runPartitionedLoader(
+      topics: NonEmptyList[String],
+      strategy: LoadTopicStrategy
+  )(implicit consumerSettings: ConsumerSettings[F, String, String], F: Async[F]): F[List[(String, String)]] = {
+    implicit val loggerFactory: LoggerFactory[F] = Slf4jFactory.create[F]
+    TopicLoader.partitionedLoad(topics, strategy, consumerSettings).compile.toList.map(_.map(recordToTuple))
+  }
+
   def moveOffsetToEnd(
       partitions: NonEmptySet[TopicPartition]
   )(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): Stream[F, KafkaConsumer[F, String, String]] =

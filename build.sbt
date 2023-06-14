@@ -39,17 +39,7 @@ lazy val it = (project in file("it"))
   .settings(
     name         := "integration-test",
     scalaVersion := scala213,
-    publish      := false,
-    libraryDependencies ++= Seq(
-      Cats.core,
-      Cats.effect,
-      Fs2.core,
-      Fs2.kafka,
-      embeddedKafka,
-      scalaTest,
-      catsEffectTesting,
-      logbackClassic
-    )
+    publish      := false
   )
   .dependsOn(root % "test->test;compile->compile")
 

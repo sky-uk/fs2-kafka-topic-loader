@@ -10,8 +10,6 @@ import fs2.{Pipe, Stream}
 import org.typelevel.log4cats.LoggerFactory
 import uk.sky.fs2.kafka.topicloader.{LoadCommitted, TopicLoader}
 
-import scala.concurrent.duration.*
-
 /** Simple application that streams Kafka records into a memory store, and produce the same record back to Kafka. On
   * startup, it will read all of the currently committed records back into this store, but not produce them to Kafka.
   */
@@ -21,7 +19,7 @@ class LoadExample[F[_] : Async, G[_] : Traverse](
     publishAndCommit: Pipe[F, G[String], Nothing],
     store: Ref[F, List[String]]
 ) {
-  private def process(message: String): F[Unit] = store.update(_ :+ message)
+  private val process = (message: String) => store.update(_ :+ message)
 
   val stream: Stream[F, G[String]] =
     (load.evalTap(process).drain ++ run.evalTap(_.traverse(process))).observe(publishAndCommit)
@@ -40,23 +38,14 @@ object LoadExample {
 
     val runStream = KafkaConsumer.stream(consumerSettings).subscribe(topics).records
 
-    val publishAndCommit: Pipe[F, CommittableConsumerRecord[F, String, String], Nothing] =
-      _.map(message =>
-        message.offset -> ProducerRecords.one(
-          ProducerRecord(topic = outputTopic, key = message.record.key, value = message.record.value)
-        )
-      ).through { offsetsAndProducerRecords =>
-        KafkaProducer.stream(producerSettings).flatMap { producer =>
-          offsetsAndProducerRecords.evalMap { case (offset, producerRecord) =>
-            producer.produce(producerRecord).flatMap(_.as(offset))
-          }
-        }
-      }.through(commitBatchWithin[F](1, 5.seconds)).drain
+    val publishStream = publishAndCommit(producerSettings) { cr =>
+      ProducerRecord(topic = outputTopic, key = cr.record.key, value = cr.record.value)
+    }
 
     new LoadExample(
       load = loadStream,
       run = runStream,
-      publishAndCommit = publishAndCommit,
+      publishAndCommit = publishStream,
       store = store
     )
   }

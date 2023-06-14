@@ -182,6 +182,29 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
     }
   }
 
+  "partitionedLoad" when {
+
+    "using loadAllStrategy" should {
+
+      val strategy = LoadAll
+
+      "stream all records from all topics" in withKafkaContext { ctx =>
+        import ctx.*
+
+        val topics                 = NonEmptyList.of(testTopic1, testTopic2)
+        val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
+
+        for {
+          _      <- createCustomTopics(topics, partitions = 2)
+          _      <- publishStringMessages(testTopic1, forTopic1)
+          _      <- publishStringMessages(testTopic2, forTopic2)
+          result <- runPartitionedLoader(topics, strategy)
+        } yield result should contain theSameElementsAs (forTopic1 ++ forTopic2)
+      }
+
+    }
+  }
+
   "loadAndRun" should {
 
     "execute callback when finished loading and keep streaming" in {
