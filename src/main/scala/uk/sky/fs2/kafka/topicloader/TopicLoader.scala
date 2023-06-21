@@ -54,11 +54,6 @@ trait TopicLoader {
       }
       .flatten
 
-  private def load[F[_] : Async : LoggerFactory, K, V](
-      consumer: KafkaConsumer[F, K, V],
-      logOffsets: NonEmptyMap[TopicPartition, LogOffsets]
-  ): Stream[F, ConsumerRecord[K, V]] = consumer.records.map(_.record).through(filterBelowHighestOffset(logOffsets))
-
   def loadAndRun[F[_] : Async : LoggerFactory, K, V](
       topics: NonEmptyList[String],
       consumerSettings: ConsumerSettings[F, K, V]
@@ -74,14 +69,15 @@ trait TopicLoader {
                                  logOffsets.toNel.traverse { case (tp, o) => consumer.seek(tp, o.lowest) }
                              )
             preLoadStream <- OptionT.pure(load(consumer, logOffsets))
-            _             <- OptionT.liftF(
-                               consumer.assign(logOffsets.keys) *>
-                                 logOffsets.toNel.traverse { case (tp, o) => consumer.seek(tp, o.highest) }
-                             )
           } yield preLoadStream.onFinalizeCase(onLoad) ++ consumer.records.map(_.record)
         }.getOrElse(Stream.empty)
       }
       .flatten
+
+  private def load[F[_] : Async : LoggerFactory, K, V](
+      consumer: KafkaConsumer[F, K, V],
+      logOffsets: NonEmptyMap[TopicPartition, LogOffsets]
+  ): Stream[F, ConsumerRecord[K, V]] = consumer.records.map(_.record).through(filterBelowHighestOffset(logOffsets))
 
   private def filterBelowHighestOffset[F[_] : Monad : LoggerFactory, K, V](
       logOffsets: NonEmptyMap[TopicPartition, LogOffsets]

@@ -188,31 +188,27 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
       import ctx.*
 
       val (preLoad, postLoad) = records(1 to 15).splitAt(10)
-      println(s"preload: $preLoad")
-      println(s"postLoad: $postLoad")
 
-      val ref: IO[Ref[IO, Boolean]]                    = Ref.of(false)
+      val loadRef: IO[Ref[IO, Boolean]]                = Ref.of(false)
       val topicRef: IO[Ref[IO, Seq[(String, String)]]] = Ref.empty
 
       for {
-        state      <- ref
+        loadState  <- loadRef
         topicState <- topicRef
         _          <- createCustomTopics(NonEmptyList.one(testTopic1))
         _          <- publishStringMessages(testTopic1, preLoad)
-        fibre      <- loadAndRunLoader(NonEmptyList.one(testTopic1))(_ => state.set(true))
-                        .debug()
+        fiber      <- loadAndRunLoader(NonEmptyList.one(testTopic1))(_ => loadState.set(true))
                         .map(recordToTuple)
-                        .evalTap(r => IO.println(s"Updating with $r") *> topicState.getAndUpdate(inter => inter :+ r))
+                        .evalTap(r => topicState.getAndUpdate(_ :+ r))
                         .compile
-                        .toList
+                        .drain
                         .start
         _          <- retry(topicState.get.asserting(_ should contain theSameElementsAs preLoad))
-        _          <- state.get.asserting(_ shouldBe true)
-        _          <- IO.println("\n\n\nREPUBLISHING\n\n\n")
+        _          <- loadState.get.asserting(_ shouldBe true)
         _          <- publishStringMessages(testTopic1, postLoad)
-        _          <- retry(topicState.get.asserting(_.sorted should contain theSameElementsAs (preLoad ++ postLoad).sorted))
-        outcome    <- fibre.joinWith(IO.raiseError(new IllegalStateException("Something happened")))
-      } yield outcome should contain theSameElementsAs preLoad ++ postLoad
+        assertion  <- retry(topicState.get.asserting(_ should contain theSameElementsAs (preLoad ++ postLoad)))
+        _          <- fiber.cancel
+      } yield assertion
     }
 
   }
