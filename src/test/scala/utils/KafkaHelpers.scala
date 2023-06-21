@@ -65,6 +65,14 @@ trait KafkaHelpers[F[_]] {
     TopicLoader.load(topics, strategy, consumerSettings).compile.toList.map(_.map(recordToTuple))
   }
 
+  def loadAndRunLoader(topics: NonEmptyList[String])(onLoad: Resource.ExitCase => F[Unit])(implicit
+      consumerSettings: ConsumerSettings[F, String, String],
+      F: Async[F]
+  ): Stream[F, ConsumerRecord[String, String]] = {
+    implicit val loggerFactory: LoggerFactory[F] = Slf4jFactory.create[F]
+    TopicLoader.loadAndRun(topics, consumerSettings)(onLoad)
+  }
+
   def moveOffsetToEnd(
       partitions: NonEmptySet[TopicPartition]
   )(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): Stream[F, KafkaConsumer[F, String, String]] =
@@ -165,7 +173,7 @@ trait KafkaHelpers[F[_]] {
     KafkaConsumer[F].resource(settings)
   }
 
-  def retry[A](fa: F[A], delay: FiniteDuration, max: Int)(implicit F: Async[F]): F[A] =
+  def retry[A](fa: F[A], delay: FiniteDuration = 1.second, max: Int = 10)(implicit F: Async[F]): F[A] =
     if (max <= 1) fa
     else
       fa handleErrorWith { _ =>

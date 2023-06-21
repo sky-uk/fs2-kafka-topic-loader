@@ -2,7 +2,7 @@ package integration
 
 import base.KafkaSpecBase
 import cats.data.NonEmptyList
-import cats.effect.IO
+import cats.effect.{IO, Ref}
 import fs2.kafka.{AutoOffsetReset, ConsumerSettings}
 import io.github.embeddedkafka.EmbeddedKafkaConfig
 import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
@@ -184,8 +184,35 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
   "loadAndRun" should {
 
-    "execute callback when finished loading and keep streaming" in {
-      pending
+    "execute callback when finished loading and keep streaming" in withKafkaContext { ctx =>
+      import ctx.*
+
+      val (preLoad, postLoad) = records(1 to 15).splitAt(10)
+      println(s"preload: $preLoad")
+      println(s"postLoad: $postLoad")
+
+      val ref: IO[Ref[IO, Boolean]]                    = Ref.of(false)
+      val topicRef: IO[Ref[IO, Seq[(String, String)]]] = Ref.empty
+
+      for {
+        state      <- ref
+        topicState <- topicRef
+        _          <- createCustomTopics(NonEmptyList.one(testTopic1))
+        _          <- publishStringMessages(testTopic1, preLoad)
+        fibre      <- loadAndRunLoader(NonEmptyList.one(testTopic1))(_ => state.set(true))
+                        .debug()
+                        .map(recordToTuple)
+                        .evalTap(r => IO.println(s"Updating with $r") *> topicState.getAndUpdate(inter => inter :+ r))
+                        .compile
+                        .toList
+                        .start
+        _          <- retry(topicState.get.asserting(_ should contain theSameElementsAs preLoad))
+        _          <- state.get.asserting(_ shouldBe true)
+        _          <- IO.println("\n\n\nREPUBLISHING\n\n\n")
+        _          <- publishStringMessages(testTopic1, postLoad)
+        _          <- retry(topicState.get.asserting(_.sorted should contain theSameElementsAs (preLoad ++ postLoad).sorted))
+        outcome    <- fibre.joinWith(IO.raiseError(new IllegalStateException("Something happened")))
+      } yield outcome should contain theSameElementsAs preLoad ++ postLoad
     }
 
   }
