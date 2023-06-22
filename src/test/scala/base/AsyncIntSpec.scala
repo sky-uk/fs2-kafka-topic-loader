@@ -9,5 +9,5 @@ import org.scalatest.wordspec.AsyncWordSpec
 import scala.concurrent.duration.*
 
 trait AsyncIntSpec extends AsyncWordSpec with AsyncIOSpec with Matchers with OptionValues with Eventually {
-  override implicit val patienceConfig: PatienceConfig = PatienceConfig(200.millis, 10.seconds)
+  override implicit val patienceConfig: PatienceConfig = PatienceConfig(30.seconds, 500.millis)
 }

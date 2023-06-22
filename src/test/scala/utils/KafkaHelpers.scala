@@ -107,7 +107,10 @@ trait KafkaHelpers[F[_]] {
       for {
         records    <- r
         messageKeys = records.map { case (k, _) => k }
-      } yield messageKeys should contain theSameElementsAs messageKeys
+      } yield {
+        messageKeys should not be empty
+        messageKeys should contain theSameElementsAs messageKeys.toSet
+      }
     }
 
   def consumeEventually(
