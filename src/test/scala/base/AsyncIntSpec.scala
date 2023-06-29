@@ -1,13 +1,30 @@
 package base
 
+import cats.effect.Async
+import cats.effect.std.Dispatcher
 import cats.effect.testing.scalatest.AsyncIOSpec
+import cats.syntax.all.*
+import org.scalactic.source.Position
 import org.scalatest.OptionValues
 import org.scalatest.concurrent.Eventually
+import org.scalatest.enablers.Retrying
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.Span
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.duration.*
 
-trait AsyncIntSpec extends AsyncWordSpec with AsyncIOSpec with Matchers with OptionValues with Eventually {
+trait AsyncIntSpec[F[_]] extends AsyncWordSpec with AsyncIOSpec with Matchers with OptionValues with Eventually {
   override implicit val patienceConfig: PatienceConfig = PatienceConfig(30.seconds, 500.millis)
+
+  implicit def fRetrying[T](implicit F: Async[F]): Retrying[F[T]] = new Retrying[F[T]] {
+    override def retry(timeout: Span, interval: Span, pos: Position)(fun: => F[T]): F[T] =
+      Dispatcher.sequential[F].use { dispatcher =>
+        F.fromFuture(
+          F.executionContext.map(
+            Retrying.retryingNatureOfFutureT[T](_).retry(timeout, interval, pos)(dispatcher.unsafeToFuture(fun))
+          )
+        )
+      }
+  }
 }

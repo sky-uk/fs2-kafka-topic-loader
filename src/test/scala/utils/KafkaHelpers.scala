@@ -11,7 +11,6 @@ import fs2.kafka.{AutoOffsetReset, ConsumerRecord, ConsumerSettings, KafkaConsum
 import io.github.embeddedkafka.EmbeddedKafkaConfig
 import org.apache.kafka.common.TopicPartition
 import org.scalatest.Assertion
-import org.scalatest.enablers.Retrying
 import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.slf4j.Slf4jFactory
 import uk.sky.fs2.kafka.topicloader.{LoadTopicStrategy, TopicLoader}
@@ -19,7 +18,7 @@ import uk.sky.fs2.kafka.topicloader.{LoadTopicStrategy, TopicLoader}
 import scala.concurrent.duration.*
 
 trait KafkaHelpers[F[_]] {
-  self: AsyncIntSpec & EmbeddedKafka[F] =>
+  self: AsyncIntSpec[F] & EmbeddedKafka[F] =>
 
   val groupId    = "test-consumer-group"
   val testTopic1 = "load-state-topic-1"
@@ -95,14 +94,14 @@ trait KafkaHelpers[F[_]] {
   def publishToKafkaAndWaitForCompaction(
       partitions: NonEmptySet[TopicPartition],
       messages: Seq[(String, String)]
-  )(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F], retrying: Retrying[F[Assertion]]): F[Unit] = for {
+  )(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Unit] = for {
     _ <- publishToKafkaAndTriggerCompaction(partitions, messages)
     _ <- waitForCompaction(partitions)
   } yield ()
 
   def waitForCompaction(
       partitions: NonEmptySet[TopicPartition]
-  )(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F], retrying: Retrying[F[Assertion]]): F[Assertion] =
+  )(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Assertion] =
     consumeEventually(partitions) { r =>
       for {
         records    <- r
@@ -118,7 +117,7 @@ trait KafkaHelpers[F[_]] {
       groupId: String = UUID.randomUUID().toString
   )(
       f: F[List[(String, String)]] => F[Assertion]
-  )(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F], retrying: Retrying[F[Assertion]]): F[Assertion] =
+  )(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Assertion] =
     eventually {
       val records = withAssignedConsumer[F[List[ConsumerRecord[String, String]]]](
         autoCommit = false,
