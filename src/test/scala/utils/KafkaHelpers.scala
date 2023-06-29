@@ -4,6 +4,8 @@ import java.util.UUID
 
 import base.AsyncIntSpec
 import cats.data.{NonEmptyList, NonEmptySet}
+import cats.effect.implicits.*
+import cats.effect.kernel.Fiber
 import cats.effect.{Async, Resource}
 import cats.syntax.all.*
 import fs2.Stream
@@ -65,6 +67,21 @@ trait KafkaHelpers[F[_]] {
     implicit val loggerFactory: LoggerFactory[F] = Slf4jFactory.create[F]
     TopicLoader.load(topics, strategy, consumerSettings).compile.toList.map(_.map(recordToTuple))
   }
+
+  def loadAndRunR(topics: NonEmptyList[String])(
+      onLoad: Resource.ExitCase => F[Unit],
+      onRecord: ((String, String)) => F[Unit]
+  )(implicit
+      consumerSettings: ConsumerSettings[F, String, String],
+      F: Async[F]
+  ): Resource[F, Fiber[F, Throwable, Unit]] = Resource.make {
+    loadAndRunLoader(topics)(onLoad)
+      .map(recordToTuple)
+      .evalTap(onRecord)
+      .compile
+      .drain
+      .start
+  }(_.cancel.void)
 
   def loadAndRunLoader(topics: NonEmptyList[String])(onLoad: Resource.ExitCase => F[Unit])(implicit
       consumerSettings: ConsumerSettings[F, String, String],

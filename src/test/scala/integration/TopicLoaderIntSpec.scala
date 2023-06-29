@@ -189,25 +189,25 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
       val (preLoad, postLoad) = records(1 to 15).splitAt(10)
 
-      val loadRef: IO[Ref[IO, Boolean]]                = Ref.of(false)
-      val topicRef: IO[Ref[IO, Seq[(String, String)]]] = Ref.empty
-
       for {
-        loadState  <- loadRef
-        topicState <- topicRef
+        loadState  <- Ref.of[IO, Boolean](false)
+        topicState <- Ref.empty[IO, Seq[(String, String)]]
         _          <- createCustomTopics(NonEmptyList.one(testTopic1))
         _          <- publishStringMessages(testTopic1, preLoad)
-        fiber      <- loadAndRunLoader(NonEmptyList.one(testTopic1))(_ => loadState.set(true))
-                        .map(recordToTuple)
-                        .evalTap(r => topicState.getAndUpdate(_ :+ r))
-                        .compile
-                        .drain
-                        .start
-        _          <- eventually(topicState.get.asserting(_ should contain theSameElementsAs preLoad))
-        _          <- loadState.get.asserting(_ shouldBe true)
-        _          <- publishStringMessages(testTopic1, postLoad)
-        assertion  <- eventually(topicState.get.asserting(_ should contain theSameElementsAs (preLoad ++ postLoad)))
-        _          <- fiber.cancel
+        assertion  <- loadAndRunR(NonEmptyList.one(testTopic1))(
+                        _ => loadState.set(true),
+                        r => topicState.getAndUpdate(_ :+ r).void
+                      ).use { _ =>
+                        for {
+                          _         <- eventually(topicState.get.asserting(_ should contain theSameElementsAs preLoad))
+                          _         <- loadState.get.asserting(_ shouldBe true)
+                          _         <- publishStringMessages(testTopic1, postLoad)
+                          assertion <-
+                            eventually(
+                              topicState.get.asserting(_ should contain theSameElementsAs (preLoad ++ postLoad))
+                            )
+                        } yield assertion
+                      }
       } yield assertion
     }
 
