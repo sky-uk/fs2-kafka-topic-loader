@@ -197,7 +197,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         assertion  <- loadAndRunR(NonEmptyList.one(testTopic1))(
                         _ => loadState.set(true),
                         r => topicState.getAndUpdate(_ :+ r).void
-                      ).use { _ =>
+                      ).surround {
                         for {
                           _         <- eventually(topicState.get.asserting(_ should contain theSameElementsAs preLoad))
                           _         <- loadState.get.asserting(_ shouldBe true)
@@ -221,6 +221,6 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
   private def withKafkaContext(test: TestContext[IO] => IO[Assertion]): IO[Assertion] = {
     object testContext extends TestContext[IO]
     import testContext.*
-    embeddedKafka.use(_ => test(testContext))
+    embeddedKafka.surround(test(testContext))
   }
 }
