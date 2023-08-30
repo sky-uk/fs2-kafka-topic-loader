@@ -2,14 +2,17 @@ package utils
 
 import java.util.UUID
 
+import base.AsyncIntSpec
 import cats.data.{NonEmptyList, NonEmptySet}
+import cats.effect.implicits.*
+import cats.effect.kernel.Fiber
 import cats.effect.{Async, Resource}
 import cats.syntax.all.*
 import fs2.Stream
 import fs2.kafka.{AutoOffsetReset, ConsumerRecord, ConsumerSettings, KafkaConsumer}
 import io.github.embeddedkafka.EmbeddedKafkaConfig
 import org.apache.kafka.common.TopicPartition
-import org.scalatest.exceptions.TestFailedException
+import org.scalatest.Assertion
 import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.slf4j.Slf4jFactory
 import uk.sky.fs2.kafka.topicloader.{LoadTopicStrategy, TopicLoader}
@@ -17,7 +20,7 @@ import uk.sky.fs2.kafka.topicloader.{LoadTopicStrategy, TopicLoader}
 import scala.concurrent.duration.*
 
 trait KafkaHelpers[F[_]] {
-  self: EmbeddedKafka[F] =>
+  self: AsyncIntSpec[F] & EmbeddedKafka[F] =>
 
   val groupId    = "test-consumer-group"
   val testTopic1 = "load-state-topic-1"
@@ -65,6 +68,29 @@ trait KafkaHelpers[F[_]] {
     TopicLoader.load(topics, strategy, consumerSettings).compile.toList.map(_.map(recordToTuple))
   }
 
+  def loadAndRunR(topics: NonEmptyList[String])(
+      onLoad: Resource.ExitCase => F[Unit],
+      onRecord: ((String, String)) => F[Unit]
+  )(implicit
+      consumerSettings: ConsumerSettings[F, String, String],
+      F: Async[F]
+  ): Resource[F, Fiber[F, Throwable, Unit]] = Resource.make {
+    loadAndRunLoader(topics)(onLoad)
+      .map(recordToTuple)
+      .evalTap(onRecord)
+      .compile
+      .drain
+      .start
+  }(_.cancel.void)
+
+  def loadAndRunLoader(topics: NonEmptyList[String])(onLoad: Resource.ExitCase => F[Unit])(implicit
+      consumerSettings: ConsumerSettings[F, String, String],
+      F: Async[F]
+  ): Stream[F, ConsumerRecord[String, String]] = {
+    implicit val loggerFactory: LoggerFactory[F] = Slf4jFactory.create[F]
+    TopicLoader.loadAndRun(topics, consumerSettings)(onLoad)
+  }
+
   def moveOffsetToEnd(
       partitions: NonEmptySet[TopicPartition]
   )(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): Stream[F, KafkaConsumer[F, String, String]] =
@@ -92,43 +118,33 @@ trait KafkaHelpers[F[_]] {
 
   def waitForCompaction(
       partitions: NonEmptySet[TopicPartition]
-  )(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Unit] =
+  )(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Assertion] =
     consumeEventually(partitions) { r =>
       for {
         records    <- r
         messageKeys = records.map { case (k, _) => k }
-        result     <-
-          if (messageKeys.sorted == messageKeys.toSet.toList.sorted) F.unit
-          else F.raiseError(new TestFailedException("Topic has not compacted within timeout", 1))
-      } yield result
+      } yield {
+        messageKeys should not be empty
+        messageKeys should contain theSameElementsAs messageKeys.toSet
+      }
     }
 
   def consumeEventually(
       partitions: NonEmptySet[TopicPartition],
       groupId: String = UUID.randomUUID().toString
   )(
-      f: F[List[(String, String)]] => F[Unit]
-  )(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Unit] =
-    retry(
-      fa = {
-        val records = withAssignedConsumer[F[List[ConsumerRecord[String, String]]]](
-          autoCommit = false,
-          offsetReset = AutoOffsetReset.Earliest,
-          partitions,
-          groupId.some
-        )(
-          _.records
-            .map(_.record)
-            .interruptAfter(5.second)
-            .compile
-            .toList
-        )
+      f: F[List[(String, String)]] => F[Assertion]
+  )(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Assertion] =
+    eventually {
+      val records = withAssignedConsumer[F[List[ConsumerRecord[String, String]]]](
+        autoCommit = false,
+        offsetReset = AutoOffsetReset.Earliest,
+        partitions,
+        groupId.some
+      )(_.records.map(_.record).interruptAfter(5.second).compile.toList)
 
-        f(records.map(_.map(r => r.key -> r.value)))
-      },
-      delay = 1.second,
-      max = 5
-    )
+      f(records.map(_.map(r => r.key -> r.value)))
+    }
 
   def withAssignedConsumer[T](
       autoCommit: Boolean,
@@ -164,11 +180,4 @@ trait KafkaHelpers[F[_]] {
     val settings = groupId.fold(baseSettings)(baseSettings.withGroupId)
     KafkaConsumer[F].resource(settings)
   }
-
-  def retry[A](fa: F[A], delay: FiniteDuration, max: Int)(implicit F: Async[F]): F[A] =
-    if (max <= 1) fa
-    else
-      fa handleErrorWith { _ =>
-        F.sleep(delay) *> retry(fa, delay, max - 1)
-      }
 }

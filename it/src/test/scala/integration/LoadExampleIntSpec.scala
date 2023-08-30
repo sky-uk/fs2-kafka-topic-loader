@@ -83,6 +83,6 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
   private def withKafkaContext(test: TestContext[IO] => IO[Assertion]): IO[Assertion] = {
     object testContext extends TestContext[IO]
     import testContext.*
-    embeddedKafka.use(_ => test(testContext))
+    embeddedKafka.surround(test(testContext))
   }
 }

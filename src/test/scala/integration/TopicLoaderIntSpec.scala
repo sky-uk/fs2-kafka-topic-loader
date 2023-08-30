@@ -2,7 +2,7 @@ package integration
 
 import base.KafkaSpecBase
 import cats.data.NonEmptyList
-import cats.effect.IO
+import cats.effect.{IO, Ref}
 import fs2.kafka.{AutoOffsetReset, ConsumerSettings}
 import io.github.embeddedkafka.EmbeddedKafkaConfig
 import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
@@ -184,8 +184,31 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
   "loadAndRun" should {
 
-    "execute callback when finished loading and keep streaming" in {
-      pending
+    "execute callback when finished loading and keep streaming" in withKafkaContext { ctx =>
+      import ctx.*
+
+      val (preLoad, postLoad) = records(1 to 15).splitAt(10)
+
+      for {
+        loadState  <- Ref.of[IO, Boolean](false)
+        topicState <- Ref.empty[IO, Seq[(String, String)]]
+        _          <- createCustomTopics(NonEmptyList.one(testTopic1))
+        _          <- publishStringMessages(testTopic1, preLoad)
+        assertion  <- loadAndRunR(NonEmptyList.one(testTopic1))(
+                        _ => loadState.set(true),
+                        r => topicState.getAndUpdate(_ :+ r).void
+                      ).surround {
+                        for {
+                          _         <- eventually(topicState.get.asserting(_ should contain theSameElementsAs preLoad))
+                          _         <- loadState.get.asserting(_ shouldBe true)
+                          _         <- publishStringMessages(testTopic1, postLoad)
+                          assertion <-
+                            eventually(
+                              topicState.get.asserting(_ should contain theSameElementsAs (preLoad ++ postLoad))
+                            )
+                        } yield assertion
+                      }
+      } yield assertion
     }
 
   }
@@ -198,6 +221,6 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
   private def withKafkaContext(test: TestContext[IO] => IO[Assertion]): IO[Assertion] = {
     object testContext extends TestContext[IO]
     import testContext.*
-    embeddedKafka.use(_ => test(testContext))
+    embeddedKafka.surround(test(testContext))
   }
 }
