@@ -16,10 +16,10 @@ trait EmbeddedKafka[F[_]] {
     zooKeeperPort <- RandomPort[F]
   } yield EmbeddedKafkaConfig(kafkaPort, zooKeeperPort, customBrokerProperties = Map("log.roll.ms" -> "10"))
 
-  def embeddedKafkaR(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): Resource[F, KafkaServer] =
+  def embeddedKafkaR(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): Resource[F, KafkaServer] =
     Resource.make(F.delay(Underlying.start().broker))(server => F.delay(server.shutdown()).void)
 
-  def createCustomTopic(topic: String, partitions: Int, topicConfig: Map[String, String])(implicit
+  def createCustomTopic(topic: String, partitions: Int, topicConfig: Map[String, String])(using
       kafkaConfig: EmbeddedKafkaConfig,
       F: Async[F]
   ): F[NonEmptyList[TopicPartition]] =
@@ -27,28 +27,28 @@ trait EmbeddedKafka[F[_]] {
       maybeCreate <-
         F.delay(Underlying.createCustomTopic(topic = topic, topicConfig = topicConfig, partitions = partitions))
       _           <- F.fromTry(maybeCreate)
-    } yield NonEmptyList.fromListUnsafe((0 until partitions).toList).map(i => new TopicPartition(topic, i))
+    } yield NonEmptyList.fromListUnsafe((0 until partitions).toList).map(i => TopicPartition(topic, i))
 
   def createCustomTopics(
       topics: NonEmptyList[String],
       partitions: Int = 2,
       topicConfig: Map[String, String] = Map.empty
-  )(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[NonEmptySet[TopicPartition]] =
+  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[NonEmptySet[TopicPartition]] =
     topics.flatTraverse(createCustomTopic(_, partitions, topicConfig)).map(_.toNes)
 
-  def publishStringMessage(topic: String, key: String, message: String)(implicit
+  def publishStringMessage(topic: String, key: String, message: String)(using
       kafkaConfig: EmbeddedKafkaConfig,
       F: Async[F]
   ): F[Unit] =
     F.delay(Underlying.publishToKafka(topic, key, message))
 
-  def publishStringMessages(topic: String, messages: Seq[(String, String)])(implicit
+  def publishStringMessages(topic: String, messages: Seq[(String, String)])(using
       kafkaConfig: EmbeddedKafkaConfig,
       F: Async[F]
   ): F[Unit] =
     messages.traverse { case (k, v) => publishStringMessage(topic, k, v) }.void
 
-  def consumeStringMessage(topic: String, autoCommit: Boolean)(implicit
+  def consumeStringMessage(topic: String, autoCommit: Boolean)(using
       kafkaConfig: EmbeddedKafkaConfig,
       F: Async[F]
   ): F[String] =

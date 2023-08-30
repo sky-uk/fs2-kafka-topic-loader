@@ -20,7 +20,7 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
 
   "LoadExample" should {
     "load previously seen messages into the store" in withKafkaContext { ctx =>
-      import ctx.*
+      import ctx.given
 
       for {
         _      <- publishStringMessage(inputTopic, "key1", "value1")
@@ -31,7 +31,7 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
     }
 
     "not publish previously committed messages" in withKafkaContext { ctx =>
-      import ctx.*
+      import ctx.given
 
       for {
         _      <- publishStringMessage(inputTopic, "key1", "value1")
@@ -50,7 +50,7 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
 
     private val store: F[Ref[F, List[String]]] = Ref[F].of(List.empty)
 
-    private implicit val loggerFactory: LoggerFactory[F] = Slf4jFactory.create[F]
+    private given LoggerFactory[F] = Slf4jFactory.create[F]
 
     private lazy val consumerSettings: ConsumerSettings[F, String, String] =
       ConsumerSettings[F, String, String]

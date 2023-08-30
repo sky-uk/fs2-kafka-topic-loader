@@ -20,10 +20,10 @@ object TopicLoader extends TopicLoader {
       consumerRecord: Option[ConsumerRecord[K, V]] = none[ConsumerRecord[K, V]]
   )
 
-  implicit val topicPartitionOrdering: Ordering[TopicPartition] = (x: TopicPartition, y: TopicPartition) =>
+  given topicPartitionOrdering: Ordering[TopicPartition] = (x: TopicPartition, y: TopicPartition) =>
     x.hashCode().compareTo(y.hashCode())
 
-  implicit val topicPartitionOrder: Order[TopicPartition] = Order.fromOrdering[TopicPartition]
+  given topicPartitionOrder: Order[TopicPartition] = Order.fromOrdering[TopicPartition]
 
   private object WithRecord {
     def unapply[K, V](h: HighestOffsetsWithRecord[K, V]): Option[ConsumerRecord[K, V]] = h.consumerRecord
@@ -32,7 +32,7 @@ object TopicLoader extends TopicLoader {
 
 trait TopicLoader {
 
-  import TopicLoader.*
+  import TopicLoader.{*, given}
 
   def load[F[_] : Async : LoggerFactory, K, V](
       topics: NonEmptyList[String],
@@ -98,7 +98,7 @@ trait TopicLoader {
     for {
       _                           <- consumer.subscribe(topics)
       partitionInfo               <- topics.toList.flatTraverse(consumer.partitionsFor)
-      topicPartitions              = partitionInfo.map(pi => new TopicPartition(pi.topic, pi.partition)).toSet
+      topicPartitions              = partitionInfo.map(pi => TopicPartition(pi.topic, pi.partition)).toSet
       beginningOffsetPerPartition <- consumer.beginningOffsets(topicPartitions)
       endOffsets                  <- strategy match {
                                        case LoadAll       => consumer.endOffsets(topicPartitions)
@@ -128,11 +128,11 @@ trait TopicLoader {
   ): F[HighestOffsetsWithRecord[K, V]] = {
     val logger = LoggerFactory[F].getLogger
 
-    val partitionHighest: Option[Long] = t.partitionOffsets.get(new TopicPartition(r.topic, r.partition))
+    val partitionHighest: Option[Long] = t.partitionOffsets.get(TopicPartition(r.topic, r.partition))
 
     val reachedHighest: OptionT[F, TopicPartition] = for {
       offset  <- OptionT.fromOption[F](partitionHighest)
-      highest <- OptionT.fromOption[F](if (r.offset >= offset) new TopicPartition(r.topic, r.partition).some else None)
+      highest <- OptionT.fromOption[F](if (r.offset >= offset) TopicPartition(r.topic, r.partition).some else None)
       _       <- OptionT.liftF(logger.warn(s"Finished loading data from ${r.topic}-${r.partition}"))
     } yield highest
 

@@ -19,7 +19,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
       val strategy = LoadAll
       "stream all records from all topics" in withKafkaContext { ctx =>
-        import ctx.*
+        import ctx.embeddedKafkaConfig
 
         val topics                 = NonEmptyList.of(testTopic1, testTopic2)
         val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
@@ -33,7 +33,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
       }
 
       "stream available records even when one topic is empty" in withKafkaContext { ctx =>
-        import ctx.*
+        import ctx.given
 
         val topics    = NonEmptyList.of(testTopic1, testTopic2)
         val published = records(1 to 15)
@@ -53,7 +53,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
       val strategy = LoadCommitted
 
       "stream all records up to the committed offset with LoadCommitted strategy" in withKafkaContext { ctx =>
-        import ctx.*
+        import ctx.given
 
         val topics                    = NonEmptyList.one(testTopic1)
         val (committed, notCommitted) = records(1 to 15).splitAt(10)
@@ -68,7 +68,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
       }
 
       "stream available records even when one topic is empty" in withKafkaContext { ctx =>
-        import ctx.*
+        import ctx.given
 
         val topics                    = NonEmptyList.of(testTopic1, testTopic2)
         val (committed, notCommitted) = records(1 to 15).splitAt(10)
@@ -84,7 +84,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
       "work when highest offset is missing in log and there are messages after highest offset" in withKafkaContext {
         ctx =>
-          import ctx.*
+          import ctx.given
 
           val published                 = records(1 to 10)
           val (notUpdated, toBeUpdated) = published.splitAt(5)
@@ -107,7 +107,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         val strategy = LoadAll
 
         "complete successfully if the topic is empty" in withKafkaContext { ctx =>
-          import ctx.*
+          import ctx.given
 
           val topics = NonEmptyList.one(testTopic1)
 
@@ -118,7 +118,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         }
 
         "read partitions that have been compacted" in withKafkaContext { ctx =>
-          import ctx.*
+          import ctx.given
 
           val published        = records(1 to 10)
           val topic            = NonEmptyList.one(testTopic1)
@@ -137,7 +137,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         val strategy = LoadCommitted
 
         "complete successfully if the topic is empty" in withKafkaContext { ctx =>
-          import ctx.*
+          import ctx.given
 
           val topics = NonEmptyList.one(testTopic1)
 
@@ -148,7 +148,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         }
 
         "read partitions that have been compacted" in withKafkaContext { ctx =>
-          import ctx.*
+          import ctx.given
 
           val published        = records(1 to 10)
           val topic            = NonEmptyList.one(testTopic1)
@@ -167,7 +167,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
     "Kafka is misbehaving" should {
 
       "fail if unavailable at startup" in withKafkaContext { _ =>
-        val badConsumerSettings = ConsumerSettings[IO, String, String]
+        given badConsumerSettings: ConsumerSettings[IO, String, String] = ConsumerSettings[IO, String, String]
           .withBootstrapServers("localhost:6001")
           .withAutoOffsetReset(AutoOffsetReset.Earliest)
           .withGroupId("test-consumer-group")
@@ -176,7 +176,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
           .withHeartbeatInterval(300.millis)
           .withDefaultApiTimeout(1000.millis)
 
-        runLoader(NonEmptyList.one(testTopic1), LoadAll)(badConsumerSettings, IO.asyncForIO)
+        runLoader(NonEmptyList.one(testTopic1), LoadAll)
           .assertThrows[KafkaTimeoutException]
       }
 
@@ -186,7 +186,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
   "loadAndRun" should {
 
     "execute callback when finished loading and keep streaming" in withKafkaContext { ctx =>
-      import ctx.*
+      import ctx.given
 
       val (preLoad, postLoad) = records(1 to 15).splitAt(10)
 
@@ -215,7 +215,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
   }
 
   private trait TestContext[F[_]] {
-    implicit val kafkaConfig: EmbeddedKafkaConfig
+    given embeddedKafkaConfig: EmbeddedKafkaConfig
   }
 
   private def withKafkaContext(test: TestContext[IO] => IO[Assertion]): IO[Assertion] =
@@ -225,7 +225,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
                       override implicit val kafkaConfig: EmbeddedKafkaConfig = config
                     }
       assertion  <- {
-        import testContext.*
+        import testContext.embeddedKafkaConfig
         embeddedKafkaR.surround(test(testContext))
       }
     } yield assertion
