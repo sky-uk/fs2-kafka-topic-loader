@@ -3,12 +3,12 @@ package integration
 import base.KafkaSpecBase
 import cats.data.NonEmptyList
 import cats.effect.{IO, Ref}
+import cats.syntax.all.*
 import fs2.kafka.{AutoOffsetReset, ConsumerSettings}
 import io.github.embeddedkafka.EmbeddedKafkaConfig
 import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
 import org.scalatest.Assertion
 import uk.sky.fs2.kafka.topicloader.{LoadAll, LoadCommitted}
-import utils.RandomPort
 
 import scala.concurrent.duration.*
 
@@ -214,13 +214,18 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
   }
 
   private trait TestContext[F[_]] {
-    implicit val kafkaConfig: EmbeddedKafkaConfig =
-      EmbeddedKafkaConfig(kafkaPort = RandomPort(), zooKeeperPort = RandomPort(), Map("log.roll.ms" -> "10"))
+    implicit val kafkaConfig: EmbeddedKafkaConfig
   }
 
-  private def withKafkaContext(test: TestContext[IO] => IO[Assertion]): IO[Assertion] = {
-    object testContext extends TestContext[IO]
-    import testContext.*
-    embeddedKafka.surround(test(testContext))
-  }
+  private def withKafkaContext(test: TestContext[IO] => IO[Assertion]): IO[Assertion] =
+    for {
+      config      <- embeddedKafkaConfigF
+      testContext <- new TestContext[IO] {
+                       override implicit val kafkaConfig: EmbeddedKafkaConfig = config
+                     }.pure[IO]
+      assertion   <- {
+        import testContext.*
+        embeddedKafkaR.surround(test(testContext))
+      }
+    } yield assertion
 }
