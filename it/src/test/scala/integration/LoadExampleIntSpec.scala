@@ -10,7 +10,6 @@ import load.LoadExample
 import org.scalatest.Assertion
 import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.slf4j.Slf4jFactory
-import utils.RandomPort
 
 import scala.concurrent.duration.*
 
@@ -46,20 +45,20 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
   }
 
   private abstract class TestContext[F[_] : Async] {
+
+    implicit val kafkaConfig: EmbeddedKafkaConfig
+
     private val store: F[Ref[F, List[String]]] = Ref[F].of(List.empty)
 
     private implicit val loggerFactory: LoggerFactory[F] = Slf4jFactory.create[F]
 
-    implicit val kafkaConfig: EmbeddedKafkaConfig =
-      EmbeddedKafkaConfig(kafkaPort = RandomPort(), zooKeeperPort = RandomPort(), Map("log.roll.ms" -> "10"))
-
-    private val consumerSettings: ConsumerSettings[F, String, String] =
+    private lazy val consumerSettings: ConsumerSettings[F, String, String] =
       ConsumerSettings[F, String, String]
         .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
         .withAutoOffsetReset(AutoOffsetReset.Earliest)
         .withGroupId("load-example-consumer-group")
 
-    private val producerSettings: ProducerSettings[F, String, String] =
+    private lazy val producerSettings: ProducerSettings[F, String, String] =
       ProducerSettings[F, String, String]
         .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
 
@@ -80,9 +79,15 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
     val runAppAndDiscard: F[Unit] = runApp.void
   }
 
-  private def withKafkaContext(test: TestContext[IO] => IO[Assertion]): IO[Assertion] = {
-    object testContext extends TestContext[IO]
-    import testContext.*
-    embeddedKafka.surround(test(testContext))
-  }
+  private def withKafkaContext(test: TestContext[IO] => IO[Assertion]): IO[Assertion] =
+    for {
+      config     <- embeddedKafkaConfigF
+      testContext = new TestContext[IO] {
+                      override implicit val kafkaConfig: EmbeddedKafkaConfig = config
+                    }
+      assertion  <- {
+        import testContext.*
+        embeddedKafkaR.surround(test(testContext))
+      }
+    } yield assertion
 }

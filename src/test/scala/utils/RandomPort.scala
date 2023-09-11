@@ -2,13 +2,14 @@ package utils
 
 import java.net.ServerSocket
 
-import scala.util.Using
+import cats.effect.{Resource, Sync}
 
 object RandomPort {
-
-  def apply(): Int = Using.resource(new ServerSocket(0)) { socket =>
-    socket.setReuseAddress(true)
-    socket.getLocalPort
-  }
-
+  def apply[F[_]](implicit F: Sync[F]): F[Int] =
+    Resource.fromAutoCloseable(F.delay(new ServerSocket(0))).use { socket =>
+      F.delay {
+        socket.setReuseAddress(true)
+        socket.getLocalPort
+      }
+    }
 }
