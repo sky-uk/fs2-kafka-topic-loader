@@ -1,7 +1,7 @@
 package utils
 
 import cats.data.{NonEmptyList, NonEmptySet}
-import cats.effect.{Async, Resource}
+import cats.effect.{Async, Resource, Sync}
 import cats.syntax.all.*
 import io.github.embeddedkafka.Codecs.stringSerializer
 import io.github.embeddedkafka.{EmbeddedKafka as Underlying, EmbeddedKafkaConfig}
@@ -11,7 +11,12 @@ import uk.sky.fs2.kafka.topicloader.TopicLoader.topicPartitionOrder
 
 trait EmbeddedKafka[F[_]] {
 
-  def embeddedKafka(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): Resource[F, KafkaServer] =
+  def embeddedKafkaConfigF(implicit F: Sync[F]): F[EmbeddedKafkaConfig] = for {
+    kafkaPort     <- RandomPort[F]
+    zooKeeperPort <- RandomPort[F]
+  } yield EmbeddedKafkaConfig(kafkaPort, zooKeeperPort, customBrokerProperties = Map("log.roll.ms" -> "10"))
+
+  def embeddedKafkaR(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): Resource[F, KafkaServer] =
     Resource.make(F.delay(Underlying.start().broker))(server => F.delay(server.shutdown()).void)
 
   def createCustomTopic(topic: String, partitions: Int, topicConfig: Map[String, String])(implicit
@@ -19,7 +24,9 @@ trait EmbeddedKafka[F[_]] {
       F: Async[F]
   ): F[NonEmptyList[TopicPartition]] =
     for {
-      _ <- F.fromTry(Underlying.createCustomTopic(topic = topic, topicConfig = topicConfig, partitions = partitions))
+      maybeCreate <-
+        F.delay(Underlying.createCustomTopic(topic = topic, topicConfig = topicConfig, partitions = partitions))
+      _           <- F.fromTry(maybeCreate)
     } yield NonEmptyList.fromListUnsafe((0 until partitions).toList).map(i => new TopicPartition(topic, i))
 
   def createCustomTopics(
