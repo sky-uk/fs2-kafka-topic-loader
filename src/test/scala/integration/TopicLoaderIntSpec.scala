@@ -25,7 +25,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
 
         for {
-          _      <- createCustomTopics(topics, partitions = 2)
+          _      <- createCustomTopics(topics)
           _      <- publishStringMessages(testTopic1, forTopic1)
           _      <- publishStringMessages(testTopic2, forTopic2)
           result <- runLoader(topics, strategy)

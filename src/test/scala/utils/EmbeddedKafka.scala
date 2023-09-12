@@ -31,7 +31,7 @@ trait EmbeddedKafka[F[_]] {
 
   def createCustomTopics(
       topics: NonEmptyList[String],
-      partitions: Int = 5,
+      partitions: Int = 2,
       topicConfig: Map[String, String] = Map.empty
   )(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[NonEmptySet[TopicPartition]] =
     topics.flatTraverse(createCustomTopic(_, partitions, topicConfig)).map(_.toNes)
