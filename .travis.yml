@@ -10,7 +10,7 @@ jdk:
 # Avoid triggering a duplicate build for PRs
 branches:
   only:
-    - master
+    - main
     - /^v\d+\.\d+\.\d+$/
 
 before_install:
@@ -19,7 +19,7 @@ before_install:
 stages:
   - name: test
   - name: release
-    if: ((branch = master AND type = push) OR (tag IS present)) AND NOT fork
+    if: ((branch = main AND type = push) OR (tag IS present)) AND NOT fork
 
 cache:
   directories:
