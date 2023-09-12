@@ -3,7 +3,6 @@ package integration
 import base.KafkaSpecBase
 import cats.data.NonEmptyList
 import cats.effect.{IO, Ref}
-import cats.syntax.all.*
 import fs2.kafka.{AutoOffsetReset, ConsumerSettings}
 import io.github.embeddedkafka.EmbeddedKafkaConfig
 import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
