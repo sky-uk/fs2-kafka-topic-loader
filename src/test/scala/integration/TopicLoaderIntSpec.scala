@@ -112,6 +112,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
           val topics = NonEmptyList.one(testTopic1)
 
           for {
+            _      <- createCustomTopics(topics)
             result <- runLoader(topics, strategy)
           } yield result shouldBe empty
         }
@@ -141,6 +142,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
           val topics = NonEmptyList.one(testTopic1)
 
           for {
+            _      <- createCustomTopics(topics)
             result <- runLoader(topics, strategy)
           } yield result shouldBe empty
         }
