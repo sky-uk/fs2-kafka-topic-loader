@@ -1,3 +1,5 @@
+[![Build Status](https://app.travis-ci.com/sky-uk/fs2-kafka-topic-loader.svg?branch=main)](https://app.travis-ci.com/sky-uk/fs2-kafka-topic-loader)
+
 # fs2-kafka-topic-loader
 
 Reads the contents of provided Kafka topics determined by the `LoadTopicStrategy`.

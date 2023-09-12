@@ -3,7 +3,6 @@ package integration
 import base.KafkaSpecBase
 import cats.data.NonEmptyList
 import cats.effect.{IO, Ref}
-import cats.syntax.all.*
 import fs2.kafka.{AutoOffsetReset, ConsumerSettings}
 import io.github.embeddedkafka.EmbeddedKafkaConfig
 import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
@@ -26,7 +25,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
 
         for {
-          _      <- createCustomTopics(topics, partitions = 2)
+          _      <- createCustomTopics(topics)
           _      <- publishStringMessages(testTopic1, forTopic1)
           _      <- publishStringMessages(testTopic2, forTopic2)
           result <- runLoader(topics, strategy)
@@ -113,6 +112,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
           val topics = NonEmptyList.one(testTopic1)
 
           for {
+            _      <- createCustomTopics(topics)
             result <- runLoader(topics, strategy)
           } yield result shouldBe empty
         }
@@ -142,6 +142,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
           val topics = NonEmptyList.one(testTopic1)
 
           for {
+            _      <- createCustomTopics(topics)
             result <- runLoader(topics, strategy)
           } yield result shouldBe empty
         }
