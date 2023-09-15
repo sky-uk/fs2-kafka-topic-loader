@@ -1,4 +1,6 @@
 [![Build Status](https://app.travis-ci.com/sky-uk/fs2-kafka-topic-loader.svg?branch=main)](https://app.travis-ci.com/sky-uk/fs2-kafka-topic-loader)
+[![Maven Central](https://img.shields.io/maven-central/v/uk.sky/fs2-kafka-topic-loader_3)](https://mvnrepository.com/artifact/uk.sky/fs2-kafka-topic-loader)
+[![Sonatype Nexus (Snapshots)](https://img.shields.io/nexus/s/uk.sky/fs2-kafka-topic-loader_3?label=snapshot&server=https%3A%2F%2Fs01.oss.sonatype.org)](https://s01.oss.sonatype.org/content/repositories/snapshots/uk/sky/fs2-kafka-topic-loader_3/)
 
 # fs2-kafka-topic-loader
 
