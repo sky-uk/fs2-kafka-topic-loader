@@ -21,19 +21,12 @@ ThisBuild / developers   := List(
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
-tpolecatScalacOptions ++= Set(
-  ScalacOptions.other("-no-indent"),
-  ScalacOptions.other("-old-syntax"),
-  ScalacOptions.other("-Wunused:all"),
-  ScalacOptions.other("-Wnonunit-statement")
-)
-Test / tpolecatExcludeOptions += ScalacOptions.warnNonUnitStatement
-
 lazy val root = (project in file("."))
   .settings(
     name               := "fs2-kafka-topic-loader",
     scalaVersion       := scala3,
     crossScalaVersions := supportedScalaVersions,
+    CommonSettings.default,
     libraryDependencies ++= Seq(
       Cats.core,
       Cats.effect,

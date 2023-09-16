@@ -2,8 +2,7 @@ package integration
 
 import base.KafkaSpecBase
 import cats.data.NonEmptyList
-import cats.effect.{Async, IO, Ref}
-import cats.syntax.all.*
+import cats.effect.{IO, Ref}
 import fs2.kafka.*
 import io.github.embeddedkafka.EmbeddedKafkaConfig
 import load.LoadExample
@@ -13,14 +12,11 @@ import org.typelevel.log4cats.slf4j.Slf4jFactory
 
 import scala.concurrent.duration.*
 
-class LoadExampleIntSpec extends KafkaSpecBase[IO] {
-  val inputTopic      = "test-topic-1"
-  val outputTopic     = "output-topic-1"
-  private val timeout = 10.seconds
+final class LoadExampleIntSpec extends KafkaSpecBase[IO] {
 
   "LoadExample" should {
     "load previously seen messages into the store" in withKafkaContext { ctx =>
-      import ctx.given
+      import ctx.{*, given}
 
       for {
         _      <- publishStringMessage(inputTopic, "key1", "value1")
@@ -31,7 +27,7 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
     }
 
     "not publish previously committed messages" in withKafkaContext { ctx =>
-      import ctx.given
+      import ctx.{*, given}
 
       for {
         _      <- publishStringMessage(inputTopic, "key1", "value1")
@@ -44,50 +40,57 @@ class LoadExampleIntSpec extends KafkaSpecBase[IO] {
     }
   }
 
-  private abstract class TestContext[F[_] : Async] {
+  private trait TestContext {
 
-    implicit val kafkaConfig: EmbeddedKafkaConfig
+    private val store: IO[Ref[IO, List[String]]] = Ref.empty
 
-    private val store: F[Ref[F, List[String]]] = Ref[F].of(List.empty)
+    val inputTopic  = "test-topic-1"
+    val outputTopic = "output-topic-1"
 
-    private given LoggerFactory[F] = Slf4jFactory.create[F]
+    private given LoggerFactory[IO] = Slf4jFactory.create[IO]
 
-    private lazy val consumerSettings: ConsumerSettings[F, String, String] =
-      ConsumerSettings[F, String, String]
-        .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
-        .withAutoOffsetReset(AutoOffsetReset.Earliest)
-        .withGroupId("load-example-consumer-group")
+    given kafkaConfig: EmbeddedKafkaConfig
 
-    private lazy val producerSettings: ProducerSettings[F, String, String] =
-      ProducerSettings[F, String, String]
-        .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
+    val consumerSettings: ConsumerSettings[IO, String, String]
 
-    val runApp: F[List[String]] =
+    val producerSettings: ProducerSettings[IO, String, String]
+
+    val runApp: IO[List[String]] =
       for {
         store   <- store
-        example1 =
-          LoadExample.kafka[F](
-            topics = NonEmptyList.one(inputTopic),
-            outputTopic = outputTopic,
-            consumerSettings = consumerSettings,
-            producerSettings = producerSettings,
-            store = store
-          )
-        stored  <- example1.stream.interruptAfter(timeout).compile.drain *> store.get
+        example1 = LoadExample.kafka[IO](
+                     topics = NonEmptyList.one(inputTopic),
+                     outputTopic = outputTopic,
+                     consumerSettings = consumerSettings,
+                     producerSettings = producerSettings,
+                     store = store
+                   )
+        _       <- example1.stream
+                     .interruptAfter(10.seconds)
+                     .compile
+                     .drain
+        stored  <- store.get
       } yield stored
 
-    val runAppAndDiscard: F[Unit] = runApp.void
+    val runAppAndDiscard: IO[Unit] = runApp.void
   }
 
-  private def withKafkaContext(test: TestContext[IO] => IO[Assertion]): IO[Assertion] =
+  private def withKafkaContext(test: TestContext => IO[Assertion]): IO[Assertion] =
     for {
       config     <- embeddedKafkaConfigF
-      testContext = new TestContext[IO] {
-                      override implicit val kafkaConfig: EmbeddedKafkaConfig = config
+      testContext = new TestContext {
+                      override given kafkaConfig: EmbeddedKafkaConfig = config
+
+                      override val consumerSettings: ConsumerSettings[IO, String, String] =
+                        ConsumerSettings[IO, String, String]
+                          .withBootstrapServers(s"localhost:${config.kafkaPort}")
+                          .withAutoOffsetReset(AutoOffsetReset.Earliest)
+                          .withGroupId("load-example-consumer-group")
+
+                      override val producerSettings: ProducerSettings[IO, String, String] =
+                        ProducerSettings[IO, String, String]
+                          .withBootstrapServers(s"localhost:${config.kafkaPort}")
                     }
-      assertion  <- {
-        import testContext.*
-        embeddedKafkaR.surround(test(testContext))
-      }
+      assertion  <- embeddedKafkaR(config).surround(test(testContext))
     } yield assertion
 }

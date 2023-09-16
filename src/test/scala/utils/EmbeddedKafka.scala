@@ -16,8 +16,8 @@ trait EmbeddedKafka[F[_]] {
     zooKeeperPort <- RandomPort[F]
   } yield EmbeddedKafkaConfig(kafkaPort, zooKeeperPort, customBrokerProperties = Map("log.roll.ms" -> "10"))
 
-  def embeddedKafkaR(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): Resource[F, KafkaServer] =
-    Resource.make(F.delay(Underlying.start().broker))(server => F.delay(server.shutdown()).void)
+  def embeddedKafkaR(kafkaConfig: EmbeddedKafkaConfig)(using F: Async[F]): Resource[F, KafkaServer] =
+    Resource.make(F.delay(Underlying.start()(kafkaConfig).broker))(server => F.delay(server.shutdown()).void)
 
   def createCustomTopic(topic: String, partitions: Int, topicConfig: Map[String, String])(using
       kafkaConfig: EmbeddedKafkaConfig,

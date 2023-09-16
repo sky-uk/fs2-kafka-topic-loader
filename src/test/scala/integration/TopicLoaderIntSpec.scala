@@ -221,12 +221,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
   private def withKafkaContext(test: TestContext[IO] => IO[Assertion]): IO[Assertion] =
     for {
       config     <- embeddedKafkaConfigF
-      testContext = new TestContext[IO] {
-                      override given embeddedKafkaConfig: EmbeddedKafkaConfig = config
-                    }
-      assertion  <- {
-        import testContext.embeddedKafkaConfig
-        embeddedKafkaR.surround(test(testContext))
-      }
+      testContext = new TestContext[IO] { override given embeddedKafkaConfig: EmbeddedKafkaConfig = config }
+      assertion  <- embeddedKafkaR(config).surround(test(testContext))
     } yield assertion
 }
