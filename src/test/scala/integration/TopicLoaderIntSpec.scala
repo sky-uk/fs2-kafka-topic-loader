@@ -222,7 +222,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
     for {
       config     <- embeddedKafkaConfigF
       testContext = new TestContext[IO] {
-                      override implicit val kafkaConfig: EmbeddedKafkaConfig = config
+                      override given embeddedKafkaConfig: EmbeddedKafkaConfig = config
                     }
       assertion  <- {
         import testContext.embeddedKafkaConfig

@@ -24,7 +24,8 @@ ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 tpolecatScalacOptions ++= Set(
   ScalacOptions.other("-no-indent"),
   ScalacOptions.other("-old-syntax"),
-  ScalacOptions.other("-Wunused:all")
+  ScalacOptions.other("-Wunused:all"),
+  ScalacOptions.other("-Wnonunit-statement")
 )
 Test / tpolecatExcludeOptions += ScalacOptions.warnNonUnitStatement
 
