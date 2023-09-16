@@ -4,10 +4,7 @@
 
 # fs2-kafka-topic-loader
 
-Reads the contents of provided Kafka topics determined by the `LoadTopicStrategy`.
-
-- `LoadAll` - reads the topics in their entirety
-- `LoadCommitted` - reads up to the configured consumer-group's last committed Offset
+Reads the contents of provided Kafka topics.
 
 This library is aimed for usage in applications that want a deterministic stream of Kafka messages that completes once
 the last message (determined above) has been read. This is useful if an application shouldn't respond to new events
@@ -15,6 +12,21 @@ before it has processed all previously seen messages, or if Kafka is being used 
 of a topic needs to be reloaded on an application restart.
 
 ## Usage
+
+### `Load`
+
+Determined by the `LoadTopicStrategy`, this stream completes once all messages have been read.
+
+Load strategies:
+
+- `LoadAll` - reads the topics in their entirety
+- `LoadCommitted` - reads up to the configured consumer-group's last committed Offset
+
+### `LoadAndRun`
+
+Read up to the latest offset, fire a callback and continue streaming messages.
+
+## Example
 
 Add the following to your `build.sbt`:
 
@@ -76,7 +88,6 @@ object Main extends IOApp.Simple {
     } yield ()
 }
 ```
-
 
 ## Configuration
 
