@@ -24,14 +24,14 @@ trait EmbeddedKafka[F[_]] {
       F: Async[F]
   ): F[NonEmptyList[TopicPartition]] =
     for {
-      maybeCreate <- F.delay {
-                       Underlying.createCustomTopic(topic = topic, topicConfig = topicConfig, partitions = partitions)
-                     }
-      _           <- F.fromTry(maybeCreate)
       tpIdxs      <- F.fromOption(
                        NonEmptyList.fromList((0 until partitions).toList),
                        IllegalStateException(s"Partitions cannot be < 1 - got $partitions")
                      )
+      maybeCreate <- F.delay {
+                       Underlying.createCustomTopic(topic = topic, topicConfig = topicConfig, partitions = partitions)
+                     }
+      _           <- F.fromTry(maybeCreate)
     } yield tpIdxs.map(TopicPartition(topic, _))
 
   def createCustomTopics(
