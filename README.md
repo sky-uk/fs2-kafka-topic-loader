@@ -56,9 +56,9 @@ import uk.sky.fs2.kafka.topicloader.{LoadAll, TopicLoader}
 object Main extends IOApp.Simple {
   val consumerSettings: ConsumerSettings[IO, String, String] = ???
 
-  val healthCheck: IO[Ref[IO, Boolean]] = Ref.of(false)
-
   given LoggerFactory[IO] = ???
+
+  val healthCheck: IO[Ref[IO, Boolean]] = Ref.of(false)
 
   val logger = LoggerFactory[IO].getLogger
 
