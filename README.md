@@ -22,13 +22,19 @@ Add the following to your `build.sbt`:
 libraryDependencies += "uk.sky" %% "fs2-kafka-topic-loader" % "<version>"
 ```
 
+### Load
+
 ```scala
 import cats.data.NonEmptyList
 import cats.effect.{IO, IOApp}
 import fs2.kafka.ConsumerSettings
+import org.typelevel.log4cats.LoggerFactory
+import uk.sky.fs2.kafka.topicloader.{LoadAll, TopicLoader}
 
 object Main extends IOApp.Simple {
   val consumerSettings: ConsumerSettings[IO, String, String] = ???
+
+  given LoggerFactory[IO] = ???
 
   override def run: IO[Unit] =
     TopicLoader.load(NonEmptyList.one("topicToLoad"), LoadAll, consumerSettings).evalTap(IO.println).compile.drain
@@ -36,6 +42,41 @@ object Main extends IOApp.Simple {
 ```
 
 See [`LoadExample.scala`](./it/src/main/scala/load/LoadExample.scala) for a more detailed example.
+
+### LoadAndRun
+
+```scala
+import cats.data.NonEmptyList
+import cats.effect.kernel.Resource.ExitCase
+import cats.effect.{IO, IOApp, Ref}
+import fs2.kafka.ConsumerSettings
+import org.typelevel.log4cats.LoggerFactory
+import uk.sky.fs2.kafka.topicloader.{LoadAll, TopicLoader}
+
+object Main extends IOApp.Simple {
+  val consumerSettings: ConsumerSettings[IO, String, String] = ???
+
+  val healthCheck: IO[Ref[IO, Boolean]] = Ref.of(false)
+
+  given LoggerFactory[IO] = ???
+
+  val logger = LoggerFactory[IO].getLogger
+
+  override def run: IO[Unit] =
+    for {
+      healthCheck <- healthCheck
+      _           <- TopicLoader
+                       .loadAndRun(NonEmptyList.one("topicToLoad"), consumerSettings) {
+                         case ExitCase.Succeeded  => healthCheck.set(true)
+                         case ExitCase.Errored(e) => logger.error(e)(s"Something went wrong: $e")
+                         case ExitCase.Canceled   => logger.warn("Stream was cancelled before loading")
+                       }
+                       .compile
+                       .drain
+    } yield ()
+}
+```
+
 
 ## Configuration
 
