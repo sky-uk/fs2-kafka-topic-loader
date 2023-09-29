@@ -14,7 +14,7 @@ object Dependencies {
   }
 
   object Fs2 {
-    lazy val core  = "co.fs2"          %% "fs2-core"  % "3.6.1"
+    lazy val core  = "co.fs2"          %% "fs2-core"  % "3.9.2"
     lazy val kafka = "com.github.fd4s" %% "fs2-kafka" % "3.0.1"
   }
 
