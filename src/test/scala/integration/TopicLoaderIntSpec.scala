@@ -11,7 +11,7 @@ import uk.sky.fs2.kafka.topicloader.{LoadAll, LoadCommitted}
 
 import scala.concurrent.duration.*
 
-class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
+final class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
   "load" when {
 
