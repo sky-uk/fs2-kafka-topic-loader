@@ -24,6 +24,7 @@ ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 ThisBuild / scalafixDependencies += Dependencies.Plugins.organizeImports
 
 tpolecatScalacOptions ++= Set(ScalacOptions.source3)
+Test / tpolecatExcludeOptions += ScalacOptions.warnNonUnitStatement
 
 lazy val root = (project in file("."))
   .settings(
