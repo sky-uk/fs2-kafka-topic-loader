@@ -22,6 +22,6 @@ object Dependencies {
   lazy val scalaTest         = "org.scalatest"           %% "scalatest"                     % "3.2.15" % Test
   lazy val catsEffectTesting = "org.typelevel"           %% "cats-effect-testing-scalatest" % "1.5.0"  % Test
 
-  lazy val logbackClassic = "ch.qos.logback" % "logback-classic" % "1.4.7" % Runtime
+  lazy val logbackClassic = "ch.qos.logback" % "logback-classic" % "1.4.11" % Runtime
 
 }
