@@ -1,4 +1,5 @@
 import Dependencies.*
+import org.typelevel.scalacoptions.ScalacOptions
 
 lazy val scala3                 = "3.3.1"
 lazy val scala213               = "2.13.10"
@@ -24,6 +25,7 @@ ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 ThisBuild / scalafixDependencies += Dependencies.Plugins.organizeImports
 
 tpolecatScalacOptions ++= Set(ScalacOptions.source3)
+Test / tpolecatExcludeOptions += ScalacOptions.warnNonUnitStatement
 
 lazy val root = (project in file("."))
   .settings(
