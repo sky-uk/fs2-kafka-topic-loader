@@ -1,8 +1,5 @@
-import io.github.davidgregory084.TpolecatPlugin.autoImport.{
-  tpolecatExcludeOptions,
-  tpolecatScalacOptions,
-  ScalacOptions
-}
+import org.typelevel.sbt.tpolecat.TpolecatPlugin.autoImport.{tpolecatExcludeOptions, tpolecatScalacOptions}
+import org.typelevel.scalacoptions.ScalacOptions
 import sbt.*
 
 object CommonSettings {
