@@ -2,10 +2,6 @@ import sbt.*
 
 object Dependencies {
 
-  object Plugins {
-    lazy val organizeImports = "com.github.liancheng" %% "organize-imports" % "0.6.0"
-  }
-
   object Cats {
     lazy val core          = "org.typelevel" %% "cats-core"      % "2.10.0"
     lazy val effect        = "org.typelevel" %% "cats-effect"    % "3.5.2"

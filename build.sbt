@@ -22,8 +22,6 @@ ThisBuild / developers   := List(
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
-ThisBuild / scalafixDependencies += Dependencies.Plugins.organizeImports
-
 tpolecatScalacOptions ++= Set(ScalacOptions.source3)
 Test / tpolecatExcludeOptions += ScalacOptions.warnNonUnitStatement
 
