@@ -2,8 +2,7 @@ import Dependencies.*
 import org.typelevel.scalacoptions.ScalacOptions
 
 lazy val scala3                 = "3.3.1"
-lazy val scala213               = "2.13.12"
-lazy val supportedScalaVersions = List(scala3, scala213)
+lazy val supportedScalaVersions = List(scala3)
 lazy val scmUrl                 = "https://github.com/sky-uk/fs2-kafka-topic-loader"
 
 ThisBuild / organization := "uk.sky"
@@ -22,16 +21,12 @@ ThisBuild / developers   := List(
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
-ThisBuild / scalafixDependencies += Dependencies.Plugins.organizeImports
-
-tpolecatScalacOptions ++= Set(ScalacOptions.source3)
-Test / tpolecatExcludeOptions += ScalacOptions.warnNonUnitStatement
-
 lazy val root = (project in file("."))
   .settings(
     name               := "fs2-kafka-topic-loader",
-    scalaVersion       := scala213,
+    scalaVersion       := scala3,
     crossScalaVersions := supportedScalaVersions,
+    CommonSettings.default,
     libraryDependencies ++= Seq(
       Cats.core,
       Cats.effect,
@@ -49,25 +44,10 @@ lazy val root = (project in file("."))
 lazy val it = (project in file("it"))
   .settings(
     name         := "integration-test",
-    scalaVersion := scala213,
+    scalaVersion := scala3,
     publish      := false
   )
   .dependsOn(root % "test->test;compile->compile")
-
-/** Scala 3 doesn't support two rules yet - RemoveUnused and ProcedureSyntax. So we require a different scalafix config
-  * for Scala 3
-  *
-  * RemoveUnused relies on -warn-unused which isn't available in scala 3 yet -
-  * https://scalacenter.github.io/scalafix/docs/rules/RemoveUnused.html
-  *
-  * ProcedureSyntax doesn't exist in Scala 3 - https://scalacenter.github.io/scalafix/docs/rules/ProcedureSyntax.html
-  */
-ThisBuild / scalafixConfig := {
-  CrossVersion.partialVersion(scalaVersion.value) match {
-    case Some((3, _)) => Some((ThisBuild / baseDirectory).value / ".scalafix3.conf")
-    case _            => None
-  }
-}
 
 Test / parallelExecution := false
 Test / fork              := true
