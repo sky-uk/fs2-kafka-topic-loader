@@ -212,6 +212,31 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
       } yield assertion
     }
 
+    "execute callback if the topic is empty and keep streaming" in withKafkaContext { ctx =>
+      import ctx.given
+
+      val (preLoad, postLoad) = records(1 to 15).splitAt(10)
+
+      for {
+        loadState  <- Ref.of[IO, Boolean](false)
+        topicState <- Ref.empty[IO, Seq[(String, String)]]
+        _          <- createCustomTopics(NonEmptyList.one(testTopic1))
+        assertion  <- loadAndRunR(NonEmptyList.one(testTopic1))(
+                        _ => loadState.set(true),
+                        r => topicState.getAndUpdate(_ :+ r).void
+                      ).surround {
+                        for {
+                          _         <- loadState.get.asserting(_ shouldBe true)
+                          _         <- publishStringMessages(testTopic1, postLoad)
+                          assertion <-
+                            eventually(
+                              topicState.get.asserting(_ should contain theSameElementsAs (preLoad ++ postLoad))
+                            )
+                        } yield assertion
+                      }
+      } yield assertion
+    }
+
   }
 
   private trait TestContext[F[_]] {
