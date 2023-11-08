@@ -215,7 +215,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
     "execute callback if the topic is empty and keep streaming" in withKafkaContext { ctx =>
       import ctx.given
 
-      val (preLoad, postLoad) = records(1 to 15).splitAt(10)
+      val postLoad = records(1 to 15)
 
       for {
         loadState  <- Ref.of[IO, Boolean](false)
@@ -226,11 +226,11 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
                         r => topicState.getAndUpdate(_ :+ r).void
                       ).surround {
                         for {
-                          _         <- loadState.get.asserting(_ shouldBe true)
+                          _         <- eventually(loadState.get.asserting(_ shouldBe true))
                           _         <- publishStringMessages(testTopic1, postLoad)
                           assertion <-
                             eventually(
-                              topicState.get.asserting(_ should contain theSameElementsAs (preLoad ++ postLoad))
+                              topicState.get.asserting(_ should contain theSameElementsAs postLoad)
                             )
                         } yield assertion
                       }
