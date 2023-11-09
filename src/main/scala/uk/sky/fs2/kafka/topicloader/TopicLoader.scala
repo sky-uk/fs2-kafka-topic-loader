@@ -34,6 +34,16 @@ trait TopicLoader {
 
   import TopicLoader.{*, given}
 
+  /** Stream that loads the specified topics from the beginning and completes when the offsets reach the point specified
+    * by the requested strategy.
+    *
+    * @param topics
+    *   topics to load
+    * @param strategy
+    *   A [[LoadTopicStrategy]]
+    * @param consumerSettings
+    *   [[fs2.kafka.ConsumerSettings]] for the given topics
+    */
   def load[F[_] : Async : LoggerFactory, K, V](
       topics: NonEmptyList[String],
       strategy: LoadTopicStrategy,
@@ -44,6 +54,16 @@ trait TopicLoader {
       .evalMap(consumer => OptionT(loadIfNonEmpty(topics, strategy, consumer)).getOrElse(Stream.empty))
       .flatten
 
+  /** Stream that loads the specified topics from the beginning. When the latest current offsets are reached, the
+    * `onLoad` callback is evaluated, and the stream continues.
+    *
+    * @param topics
+    *   topics to load
+    * @param consumerSettings
+    *   [[fs2.kafka.ConsumerSettings]] for the given topics
+    * @param onLoad
+    *   A callback that will be evaluated on once the current offsets are reached
+    */
   def loadAndRun[F[_] : Async : LoggerFactory, K, V](
       topics: NonEmptyList[String],
       consumerSettings: ConsumerSettings[F, K, V]
