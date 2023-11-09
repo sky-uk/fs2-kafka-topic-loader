@@ -190,7 +190,10 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
       val (preLoad, postLoad) = records(1 to 15).splitAt(10)
 
-      def testState(loadState: Ref[IO, Boolean], topicState: Ref[IO, Seq[(String, String)]]): IO[Assertion] =
+      def assertPostLoadRecordsConsumed(
+          loadState: Ref[IO, Boolean],
+          topicState: Ref[IO, Seq[(String, String)]]
+      ): IO[Assertion] =
         loadAndRunR(NonEmptyList.one(testTopic1))(
           _ => loadState.set(true),
           r => topicState.getAndUpdate(_ :+ r).void
@@ -211,7 +214,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         topicState <- Ref.empty[IO, Seq[(String, String)]]
         _          <- createCustomTopics(NonEmptyList.one(testTopic1))
         _          <- publishStringMessages(testTopic1, preLoad)
-        assertion  <- testState(loadState, topicState)
+        assertion  <- assertPostLoadRecordsConsumed(loadState, topicState)
       } yield assertion
     }
 
@@ -220,7 +223,10 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
       val postLoad = records(1 to 15)
 
-      def testState(loadState: Ref[IO, Boolean], topicState: Ref[IO, Seq[(String, String)]]): IO[Assertion] =
+      def assertPostLoadRecordsConsumed(
+          loadState: Ref[IO, Boolean],
+          topicState: Ref[IO, Seq[(String, String)]]
+      ): IO[Assertion] =
         loadAndRunR(NonEmptyList.one(testTopic1))(
           _ => loadState.set(true),
           r => topicState.getAndUpdate(_ :+ r).void
@@ -239,7 +245,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         loadState  <- Ref.of[IO, Boolean](false)
         topicState <- Ref.empty[IO, Seq[(String, String)]]
         _          <- createCustomTopics(NonEmptyList.one(testTopic1))
-        assertion  <- testState(loadState, topicState)
+        assertion  <- assertPostLoadRecordsConsumed(loadState, topicState)
       } yield assertion
     }
 
@@ -249,7 +255,10 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
       val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
       val topics                 = NonEmptyList.of(testTopic1, testTopic2)
 
-      def testState(loadState: Ref[IO, Boolean], topicState: Ref[IO, Seq[(String, String)]]): IO[Assertion] =
+      def assertPostLoadRecordsConsumed(
+          loadState: Ref[IO, Boolean],
+          topicState: Ref[IO, Seq[(String, String)]]
+      ): IO[Assertion] =
         loadAndRunR(topics)(
           _ => loadState.set(true),
           r => topicState.getAndUpdate(_ :+ r).void
@@ -270,7 +279,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         topicState <- Ref.empty[IO, Seq[(String, String)]]
         _          <- createCustomTopics(topics)
         _          <- publishStringMessages(testTopic1, forTopic1)
-        assertion  <- testState(loadState, topicState)
+        assertion  <- assertPostLoadRecordsConsumed(loadState, topicState)
       } yield assertion
     }
 
