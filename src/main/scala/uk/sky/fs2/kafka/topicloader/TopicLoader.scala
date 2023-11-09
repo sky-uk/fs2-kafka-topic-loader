@@ -52,7 +52,10 @@ trait TopicLoader {
       .stream(consumerSettings)
       .evalMap { consumer =>
         OptionT(loadIfNonEmpty(topics, LoadAll, consumer))
-          .getOrElse(Stream.eval(consumer.subscribe(topics)).drain)
+          .getOrElse(
+            // If there are no logOffsets we need to ensure we're subscribed to continue streaming
+            Stream.eval(consumer.subscribe(topics)).drain
+          )
           .map(_.onFinalizeCase(onLoad) ++ consumer.records.map(_.record))
       }
       .flatten
@@ -88,7 +91,10 @@ trait TopicLoader {
     for {
       topicPartitions             <-
         topics.toList
-          .flatTraverse(topic => consumer.assign(topic) *> partitionsForTopics(topics, consumer).map(_.toList))
+          .flatTraverse(topic =>
+            // Assign doesn't support incremental subscription, so we must aggregate partitions per topic
+            consumer.assign(topic) *> partitionsForTopics(topics, consumer).map(_.toList)
+          )
           .map(_.toSet)
       beginningOffsetPerPartition <- consumer.beginningOffsets(topicPartitions)
       endOffsets                  <- strategy match {
