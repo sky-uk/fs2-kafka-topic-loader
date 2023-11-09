@@ -44,13 +44,10 @@ trait TopicLoader {
       .evalMap { consumer =>
         {
           for {
-            logOffsets      <- OptionT(logOffsetsForTopics(topics, strategy, consumer))
-            nonEmptyOffsets <- OptionT.fromOption(NonEmptyMap.fromMap(logOffsets.filter(o => o.highest > o.lowest)))
-            _               <- OptionT.liftF(
-                                 consumer.assign(nonEmptyOffsets.keys) *>
-                                   nonEmptyOffsets.toNel.traverse { case (tp, o) => consumer.seek(tp, o.lowest) }
-                               )
-          } yield load(consumer, nonEmptyOffsets)
+            logOffsets <- OptionT(logOffsetsForTopics(topics, strategy, consumer))
+            _          <- OptionT.liftF(consumer.assign(logOffsets.keys))
+            _          <- OptionT.liftF(logOffsets.toNel.traverse { case (tp, o) => consumer.seek(tp, o.lowest) })
+          } yield load(consumer, logOffsets)
         }.getOrElse(Stream.empty)
       }
       .flatten
@@ -64,12 +61,12 @@ trait TopicLoader {
       .evalMap { consumer =>
         {
           for {
-            logOffsets      <- OptionT(logOffsetsForTopics(topics, LoadAll, consumer))
-            nonEmptyOffsets <- OptionT.fromOption(NonEmptyMap.fromMap(logOffsets.filter(o => o.highest > o.lowest)))
-            _               <- OptionT.liftF(nonEmptyOffsets.toNel.traverse { case (tp, o) => consumer.seek(tp, o.lowest) })
-          } yield load(consumer, nonEmptyOffsets)
-        }.getOrElse(Stream.empty)
-          .map(foo => foo.onFinalizeCase(onLoad) ++ consumer.records.map(_.record))
+            logOffsets <- OptionT(logOffsetsForTopics(topics, LoadAll, consumer))
+            _          <- OptionT.liftF(consumer.assign(logOffsets.keys))
+            _          <- OptionT.liftF(logOffsets.toNel.traverse { case (tp, o) => consumer.seek(tp, o.lowest) })
+          } yield load(consumer, logOffsets)
+        }.getOrElse(Stream.eval(consumer.subscribe(topics)).drain)
+          .map(_.onFinalizeCase(onLoad) ++ consumer.records.map(_.record))
       }
       .flatten
 
@@ -107,7 +104,11 @@ trait TopicLoader {
       logOffsets                   = beginningOffsetPerPartition.map { case (partition, offset) =>
                                        partition -> LogOffsets(offset, endOffsets(partition))
                                      }
-    } yield NonEmptyMap.fromMap(SortedMap.from(logOffsets))
+      _                           <- consumer.unsubscribe
+    } yield {
+      val offsets = logOffsets.filter { case (_, o) => o.highest > o.lowest }
+      NonEmptyMap.fromMap(SortedMap.from(offsets))
+    }
 
   private def earliestOffsets[F[_] : Monad, K, V](
       consumer: KafkaConsumer[F, K, V],
