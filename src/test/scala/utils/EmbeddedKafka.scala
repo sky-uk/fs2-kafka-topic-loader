@@ -17,7 +17,7 @@ trait EmbeddedKafka[F[_]] {
   } yield EmbeddedKafkaConfig(kafkaPort, zooKeeperPort, customBrokerProperties = Map("log.roll.ms" -> "10"))
 
   def embeddedKafkaR(kafkaConfig: EmbeddedKafkaConfig)(using F: Async[F]): Resource[F, KafkaServer] =
-    Resource.make(F.delay(Underlying.start()(kafkaConfig).broker))(server => F.delay(server.shutdown()).void)
+    Resource.make(F.blocking(Underlying.start()(kafkaConfig).broker))(server => F.blocking(server.shutdown()).void)
 
   def createCustomTopic(topic: String, partitions: Int, topicConfig: Map[String, String])(using
       kafkaConfig: EmbeddedKafkaConfig,
@@ -28,7 +28,7 @@ trait EmbeddedKafka[F[_]] {
                        NonEmptyList.fromList((0 until partitions).toList),
                        IllegalStateException(s"Partitions cannot be < 1 - got $partitions")
                      )
-      maybeCreate <- F.delay {
+      maybeCreate <- F.blocking {
                        Underlying.createCustomTopic(topic = topic, topicConfig = topicConfig, partitions = partitions)
                      }
       _           <- F.fromTry(maybeCreate)
@@ -45,7 +45,7 @@ trait EmbeddedKafka[F[_]] {
       kafkaConfig: EmbeddedKafkaConfig,
       F: Async[F]
   ): F[Unit] =
-    F.delay(Underlying.publishToKafka(topic, key, message))
+    F.blocking(Underlying.publishToKafka(topic, key, message))
 
   def publishStringMessages(topic: String, messages: Seq[(String, String)])(using
       kafkaConfig: EmbeddedKafkaConfig,
@@ -57,6 +57,6 @@ trait EmbeddedKafka[F[_]] {
       kafkaConfig: EmbeddedKafkaConfig,
       F: Async[F]
   ): F[String] =
-    F.delay(Underlying.consumeFirstStringMessageFrom(topic, autoCommit = autoCommit))
+    F.blocking(Underlying.consumeFirstStringMessageFrom(topic, autoCommit = autoCommit))
 
 }
