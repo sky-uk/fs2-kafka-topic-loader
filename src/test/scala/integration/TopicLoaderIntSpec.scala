@@ -201,7 +201,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
                       ).surround {
                         for {
                           _         <- eventually(topicState.get.asserting(_ should contain theSameElementsAs preLoad))
-                          _         <- loadState.get.asserting(_ shouldBe true)
+                          _         <- eventually(loadState.get.asserting(_ shouldBe true))
                           _         <- publishStringMessages(testTopic1, postLoad)
                           assertion <-
                             eventually(
@@ -231,6 +231,34 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
                           assertion <-
                             eventually(
                               topicState.get.asserting(_ should contain theSameElementsAs postLoad)
+                            )
+                        } yield assertion
+                      }
+      } yield assertion
+    }
+
+    "execute callback if one topic is empty and keep streaming" in withKafkaContext { ctx =>
+      import ctx.given
+
+      val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
+      val topics                 = NonEmptyList.of(testTopic1, testTopic2)
+
+      for {
+        loadState  <- Ref.of[IO, Boolean](false)
+        topicState <- Ref.empty[IO, Seq[(String, String)]]
+        _          <- createCustomTopics(topics)
+        _          <- publishStringMessages(testTopic1, forTopic1)
+        assertion  <- loadAndRunR(topics)(
+                        _ => loadState.set(true),
+                        r => topicState.getAndUpdate(_ :+ r).void
+                      ).surround {
+                        for {
+                          _         <- eventually(topicState.get.asserting(_ should contain theSameElementsAs forTopic1))
+                          _         <- eventually(loadState.get.asserting(_ shouldBe true))
+                          _         <- publishStringMessages(testTopic2, forTopic2)
+                          assertion <-
+                            eventually(
+                              topicState.get.asserting(_ should contain theSameElementsAs (forTopic1 ++ forTopic2))
                             )
                         } yield assertion
                       }
