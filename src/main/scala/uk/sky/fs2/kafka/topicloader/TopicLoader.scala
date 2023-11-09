@@ -41,15 +41,7 @@ trait TopicLoader {
   ): Stream[F, ConsumerRecord[K, V]] =
     KafkaConsumer
       .stream(consumerSettings)
-      .evalMap { consumer =>
-        {
-          for {
-            logOffsets <- OptionT(logOffsetsForTopics(topics, strategy, consumer))
-            _          <- OptionT.liftF(consumer.assign(logOffsets.keys))
-            _          <- OptionT.liftF(logOffsets.toNel.traverse { case (tp, o) => consumer.seek(tp, o.lowest) })
-          } yield load(consumer, logOffsets)
-        }.getOrElse(Stream.empty)
-      }
+      .evalMap(consumer => OptionT(loadIfNonEmpty(topics, strategy, consumer)).getOrElse(Stream.empty))
       .flatten
 
   def loadAndRun[F[_] : Async : LoggerFactory, K, V](
@@ -59,21 +51,23 @@ trait TopicLoader {
     KafkaConsumer
       .stream(consumerSettings)
       .evalMap { consumer =>
-        {
-          for {
-            logOffsets <- OptionT(logOffsetsForTopics(topics, LoadAll, consumer))
-            _          <- OptionT.liftF(consumer.assign(logOffsets.keys))
-            _          <- OptionT.liftF(logOffsets.toNel.traverse { case (tp, o) => consumer.seek(tp, o.lowest) })
-          } yield load(consumer, logOffsets)
-        }.getOrElse(Stream.eval(consumer.subscribe(topics)).drain)
+        OptionT(loadIfNonEmpty(topics, LoadAll, consumer))
+          .getOrElse(Stream.eval(consumer.subscribe(topics)).drain)
           .map(_.onFinalizeCase(onLoad) ++ consumer.records.map(_.record))
       }
       .flatten
 
-  private def load[F[_] : Async : LoggerFactory, K, V](
-      consumer: KafkaConsumer[F, K, V],
-      logOffsets: NonEmptyMap[TopicPartition, LogOffsets]
-  ): Stream[F, ConsumerRecord[K, V]] = consumer.records.map(_.record).through(filterBelowHighestOffset(logOffsets))
+  private def loadIfNonEmpty[F[_] : Async : LoggerFactory, K, V](
+      topics: NonEmptyList[String],
+      strategy: LoadTopicStrategy,
+      consumer: KafkaConsumer[F, K, V]
+  ): F[Option[Stream[F, ConsumerRecord[K, V]]]] = {
+    for {
+      logOffsets <- OptionT(logOffsetsForTopics(topics, strategy, consumer))
+      _          <- OptionT.liftF(consumer.assign(logOffsets.keys))
+      _          <- OptionT.liftF(logOffsets.toNel.traverse { case (tp, o) => consumer.seek(tp, o.lowest) })
+    } yield consumer.records.map(_.record).through(filterBelowHighestOffset(logOffsets))
+  }.value
 
   private def filterBelowHighestOffset[F[_] : Async : LoggerFactory, K, V](
       logOffsets: NonEmptyMap[TopicPartition, LogOffsets]
