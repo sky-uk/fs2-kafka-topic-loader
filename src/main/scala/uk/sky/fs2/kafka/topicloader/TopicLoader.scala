@@ -100,7 +100,7 @@ trait TopicLoader {
       logOffsets: NonEmptyMap[TopicPartition, LogOffsets]
   ): Pipe[F, ConsumerRecord[K, V], ConsumerRecord[K, V]] = {
     val nonEmptyOffsets =
-      logOffsets.toSortedMap.filter((_, o) => o.highest > 0)
+      logOffsets.toSortedMap.filter((_, o) => o.highest > o.lowest)
 
     val allHighestOffsets: HighestOffsetsWithRecord[K, V] =
       HighestOffsetsWithRecord[K, V](nonEmptyOffsets.map((p, o) => p -> (o.highest - 1)))
