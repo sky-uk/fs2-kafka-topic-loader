@@ -13,6 +13,8 @@ import fs2.kafka.{AutoOffsetReset, ConsumerRecord, ConsumerSettings, KafkaConsum
 import io.github.embeddedkafka.EmbeddedKafkaConfig
 import org.apache.kafka.common.TopicPartition
 import org.scalatest.Assertion
+import org.scalatest.concurrent.AbstractPatienceConfiguration
+import org.scalatest.exceptions.TestFailedException
 import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.slf4j.Slf4jFactory
 import uk.sky.fs2.kafka.topicloader.{LoadTopicStrategy, TopicLoader}
@@ -20,7 +22,7 @@ import uk.sky.fs2.kafka.topicloader.{LoadTopicStrategy, TopicLoader}
 import scala.concurrent.duration.*
 
 trait KafkaHelpers[F[_]] {
-  self: AsyncIntSpec[F] & EmbeddedKafka[F] =>
+  self: AsyncIntSpec[F] & EmbeddedKafka[F] & AbstractPatienceConfiguration =>
 
   val groupId    = "test-consumer-group"
   val testTopic1 = "load-state-topic-1"
@@ -73,7 +75,15 @@ trait KafkaHelpers[F[_]] {
       strategy: LoadTopicStrategy
   )(using consumerSettings: ConsumerSettings[F, String, String], F: Async[F]): F[List[(String, String)]] = {
     given LoggerFactory[F] = Slf4jFactory.create[F]
-    TopicLoader.load(topics, strategy, consumerSettings).compile.toList.map(_.map(recordToTuple))
+    TopicLoader
+      .load(topics, strategy, consumerSettings)
+      .compile
+      .toList
+      .map(_.map(recordToTuple))
+      .timeoutTo(
+        patienceConfig.timeout,
+        F.raiseError(TestFailedException(s"TopicLoader did not complete after ${patienceConfig.timeout}", 0))
+      )
   }
 
   def loadAndRunR(topics: NonEmptyList[String])(
