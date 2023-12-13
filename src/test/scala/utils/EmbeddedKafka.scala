@@ -3,11 +3,11 @@ package utils
 import cats.data.{NonEmptyList, NonEmptySet}
 import cats.effect.{Async, Resource, Sync}
 import cats.syntax.all.*
+import fs2.kafka.instances.*
 import io.github.embeddedkafka.Codecs.stringSerializer
 import io.github.embeddedkafka.{EmbeddedKafka as Underlying, EmbeddedKafkaConfig}
 import kafka.server.KafkaServer
 import org.apache.kafka.common.TopicPartition
-import uk.sky.fs2.kafka.topicloader.TopicLoader.topicPartitionOrder
 
 trait EmbeddedKafka[F[_]] {
 

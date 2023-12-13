@@ -42,6 +42,14 @@ trait KafkaHelpers[F[_]] {
     "segment.ms"                -> "1"
   )
 
+  val aggressiveDeletionConfig = Map(
+    "cleanup.policy"            -> "delete",
+    "delete.retention.ms"       -> "0",
+    "retention.ms"              -> "0",
+    "min.cleanable.dirty.ratio" -> "0.01",
+    "segment.ms"                -> "1"
+  )
+
   def records(r: Seq[Int]): Seq[(String, String)] = r.map(i => s"k$i" -> s"v$i")
 
   def recordToTuple[K, V](record: ConsumerRecord[K, V]): (K, V) = (record.key, record.value)
@@ -116,6 +124,14 @@ trait KafkaHelpers[F[_]] {
     _ <- waitForCompaction(partitions)
   } yield ()
 
+  def publishToKafkaAndWaitForDeletion(
+      partitions: NonEmptySet[TopicPartition],
+      messages: Seq[(String, String)]
+  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Unit] = for {
+    _ <- publishToKafkaAndTriggerCompaction(partitions, messages)
+    _ <- waitForDeletion(partitions)
+  } yield ()
+
   def waitForCompaction(
       partitions: NonEmptySet[TopicPartition]
   )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Assertion] =
@@ -127,6 +143,15 @@ trait KafkaHelpers[F[_]] {
         messageKeys should not be empty
         messageKeys should contain theSameElementsAs messageKeys.toSet
       }
+    }
+
+  def waitForDeletion(
+      partitions: NonEmptySet[TopicPartition]
+  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Assertion] =
+    consumeEventually(partitions) { r =>
+      for {
+        records <- r
+      } yield records shouldBe empty
     }
 
   def consumeEventually(

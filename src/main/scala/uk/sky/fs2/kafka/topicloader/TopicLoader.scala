@@ -1,10 +1,11 @@
 package uk.sky.fs2.kafka.topicloader
 
+import cats.Monad
 import cats.data.{NonEmptyList, NonEmptyMap, OptionT}
 import cats.effect.Async
 import cats.effect.kernel.Resource
 import cats.syntax.all.*
-import cats.{Monad, Order}
+import fs2.kafka.instances.*
 import fs2.kafka.{ConsumerRecord, ConsumerSettings, KafkaConsumer}
 import fs2.{Pipe, Stream}
 import org.apache.kafka.common.TopicPartition
@@ -20,11 +21,6 @@ object TopicLoader extends TopicLoader {
       consumerRecord: Option[ConsumerRecord[K, V]] = none[ConsumerRecord[K, V]]
   )
 
-  given topicPartitionOrdering: Ordering[TopicPartition] = (x: TopicPartition, y: TopicPartition) =>
-    x.hashCode().compareTo(y.hashCode())
-
-  given topicPartitionOrder: Order[TopicPartition] = Order.fromOrdering[TopicPartition]
-
   private object WithRecord {
     def unapply[K, V](h: HighestOffsetsWithRecord[K, V]): Option[ConsumerRecord[K, V]] = h.consumerRecord
   }
@@ -32,7 +28,7 @@ object TopicLoader extends TopicLoader {
 
 trait TopicLoader {
 
-  import TopicLoader.{*, given}
+  import TopicLoader.*
 
   /** Stream that loads the specified topics from the beginning and completes when the offsets reach the point specified
     * by the requested strategy.
@@ -77,15 +73,17 @@ trait TopicLoader {
       topics: NonEmptyList[String],
       strategy: LoadTopicStrategy,
       consumer: KafkaConsumer[F, K, V]
-  ): Stream[F, ConsumerRecord[K, V]] = Stream
-    .eval({
+  ): Stream[F, ConsumerRecord[K, V]] = Stream.eval {
+    val logger = LoggerFactory[F].getLogger
+    {
       for {
         logOffsets <- OptionT(logOffsetsForTopics(topics, strategy, consumer))
+        _          <- OptionT.liftF(logger.warn(s"Assigning partitions: ${logOffsets.keys.mkString_(",")}"))
         _          <- OptionT.liftF(consumer.assign(logOffsets.keys))
         _          <- OptionT.liftF(logOffsets.toNel.traverse((tp, o) => consumer.seek(tp, o.lowest)))
       } yield consumer.records.map(_.record).through(filterBelowHighestOffset(logOffsets))
-    }.getOrElse(Stream.empty))
-    .flatten
+    }.getOrElse(Stream.empty)
+  }.flatten
 
   private def filterBelowHighestOffset[F[_] : Monad : LoggerFactory, K, V](
       logOffsets: NonEmptyMap[TopicPartition, LogOffsets]

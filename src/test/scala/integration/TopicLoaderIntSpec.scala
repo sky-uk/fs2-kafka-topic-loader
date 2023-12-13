@@ -1,8 +1,9 @@
 package integration
 
 import base.KafkaSpecBase
-import cats.data.NonEmptyList
+import cats.data.{NonEmptyList, NonEmptySet}
 import cats.effect.{IO, Ref}
+import fs2.kafka.instances.*
 import fs2.kafka.{AutoOffsetReset, ConsumerSettings}
 import io.github.embeddedkafka.EmbeddedKafkaConfig
 import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
@@ -155,9 +156,26 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
           val publishedUpdated = published.map { case (k, v) => (k, v.reverse) }
 
           for {
-            partitions <- createCustomTopics(topic, partitions = 1, topicConfig = aggressiveCompactionConfig)
-            _          <- publishToKafkaAndWaitForCompaction(partitions, published ++ publishedUpdated)
-            result     <- runLoader(topic, strategy)
+            partitions    <- createCustomTopics(topic, partitions = 3, topicConfig = aggressiveCompactionConfig)
+            firstPartition = partitions.head
+            _             <- publishToKafkaAndWaitForCompaction(NonEmptySet.one(firstPartition), published ++ publishedUpdated)
+            result        <- runLoader(topic, strategy)
+          } yield result should contain noElementsOf published
+        }
+
+        "read partitions that have been deleted" in withKafkaContext { ctx =>
+          import ctx.given
+
+          val published        = records(1 to 10)
+          val topic            = NonEmptyList.one(testTopic1)
+          val publishedUpdated = published.map { case (k, v) => (k, v.reverse) }
+
+          for {
+            partitions    <- createCustomTopics(topic, partitions = 1, topicConfig = aggressiveDeletionConfig)
+            firstPartition = partitions.head
+            _             <- publishToKafkaAndWaitForDeletion(NonEmptySet.one(firstPartition), published ++ publishedUpdated)
+            _             <- IO.println("Topics have deleted")
+            result        <- runLoader(topic, strategy)
           } yield result should contain noElementsOf published
         }
       }
