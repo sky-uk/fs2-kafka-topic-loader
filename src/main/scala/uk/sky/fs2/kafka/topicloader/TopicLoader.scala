@@ -30,7 +30,6 @@ object TopicLoader extends TopicLoader {
   private object WithRecord {
     def unapply[K, V](h: HighestOffsetsWithRecord[K, V]): Option[ConsumerRecord[K, V]] = h.consumerRecord
   }
-
 }
 
 trait TopicLoader {

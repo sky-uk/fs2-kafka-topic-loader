@@ -82,7 +82,7 @@ trait KafkaHelpers[F[_]] {
       .map(_.map(recordToTuple))
       .timeoutTo(
         patienceConfig.timeout,
-        F.raiseError(TestFailedException(s"TopicLoader did not complete after ${patienceConfig.timeout}", 0))
+        F.raiseError(TestFailedException(s"TopicLoader did not complete after ${patienceConfig.timeout.toSeconds}s", 0))
       )
   }
 
