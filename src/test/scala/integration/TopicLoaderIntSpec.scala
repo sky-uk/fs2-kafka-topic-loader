@@ -130,6 +130,20 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
             result     <- runLoader(topic, strategy)
           } yield result should contain noElementsOf published
         }
+
+        "read partitions that have been deleted" in withKafkaContext { ctx =>
+          import ctx.given
+
+          val published        = records(1 to 10)
+          val topic            = NonEmptyList.one(testTopic1)
+          val publishedUpdated = published.map { case (k, v) => (k, v.reverse) }
+
+          for {
+            partitions <- createCustomTopics(topic, partitions = 1, topicConfig = aggressiveDeletionConfig)
+            _          <- publishToKafkaAndWaitForDeletion(partitions, published ++ publishedUpdated)
+            result     <- runLoader(topic, strategy)
+          } yield result should contain noElementsOf published
+        }
       }
 
       "strategy is LoadCommitted" should {
@@ -157,6 +171,20 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
           for {
             partitions <- createCustomTopics(topic, partitions = 1, topicConfig = aggressiveCompactionConfig)
             _          <- publishToKafkaAndWaitForCompaction(partitions, published ++ publishedUpdated)
+            result     <- runLoader(topic, strategy)
+          } yield result should contain noElementsOf published
+        }
+
+        "read partitions that have been deleted" in withKafkaContext { ctx =>
+          import ctx.given
+
+          val published        = records(1 to 10)
+          val topic            = NonEmptyList.one(testTopic1)
+          val publishedUpdated = published.map { case (k, v) => (k, v.reverse) }
+
+          for {
+            partitions <- createCustomTopics(topic, partitions = 1, topicConfig = aggressiveDeletionConfig)
+            _          <- publishToKafkaAndWaitForDeletion(partitions, published ++ publishedUpdated)
             result     <- runLoader(topic, strategy)
           } yield result should contain noElementsOf published
         }

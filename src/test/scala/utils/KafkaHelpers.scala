@@ -13,6 +13,8 @@ import fs2.kafka.{AutoOffsetReset, ConsumerRecord, ConsumerSettings, KafkaConsum
 import io.github.embeddedkafka.EmbeddedKafkaConfig
 import org.apache.kafka.common.TopicPartition
 import org.scalatest.Assertion
+import org.scalatest.concurrent.AbstractPatienceConfiguration
+import org.scalatest.exceptions.TestFailedException
 import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.slf4j.Slf4jFactory
 import uk.sky.fs2.kafka.topicloader.{LoadTopicStrategy, TopicLoader}
@@ -20,7 +22,7 @@ import uk.sky.fs2.kafka.topicloader.{LoadTopicStrategy, TopicLoader}
 import scala.concurrent.duration.*
 
 trait KafkaHelpers[F[_]] {
-  self: AsyncIntSpec[F] & EmbeddedKafka[F] =>
+  self: AsyncIntSpec[F] & EmbeddedKafka[F] & AbstractPatienceConfiguration =>
 
   val groupId    = "test-consumer-group"
   val testTopic1 = "load-state-topic-1"
@@ -38,6 +40,14 @@ trait KafkaHelpers[F[_]] {
   val aggressiveCompactionConfig = Map(
     "cleanup.policy"            -> "compact",
     "delete.retention.ms"       -> "0",
+    "min.cleanable.dirty.ratio" -> "0.01",
+    "segment.ms"                -> "1"
+  )
+
+  val aggressiveDeletionConfig = Map(
+    "cleanup.policy"            -> "delete",
+    "delete.retention.ms"       -> "0",
+    "retention.ms"              -> "0",
     "min.cleanable.dirty.ratio" -> "0.01",
     "segment.ms"                -> "1"
   )
@@ -65,7 +75,15 @@ trait KafkaHelpers[F[_]] {
       strategy: LoadTopicStrategy
   )(using consumerSettings: ConsumerSettings[F, String, String], F: Async[F]): F[List[(String, String)]] = {
     given LoggerFactory[F] = Slf4jFactory.create[F]
-    TopicLoader.load(topics, strategy, consumerSettings).compile.toList.map(_.map(recordToTuple))
+    TopicLoader
+      .load(topics, strategy, consumerSettings)
+      .compile
+      .toList
+      .map(_.map(recordToTuple))
+      .timeoutTo(
+        patienceConfig.timeout,
+        F.raiseError(TestFailedException(s"TopicLoader did not complete after ${patienceConfig.timeout.toSeconds}s", 0))
+      )
   }
 
   def loadAndRunR(topics: NonEmptyList[String])(
@@ -116,6 +134,14 @@ trait KafkaHelpers[F[_]] {
     _ <- waitForCompaction(partitions)
   } yield ()
 
+  def publishToKafkaAndWaitForDeletion(
+      partitions: NonEmptySet[TopicPartition],
+      messages: Seq[(String, String)]
+  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Unit] = for {
+    _ <- publishToKafkaAndTriggerCompaction(partitions, messages)
+    _ <- waitForDeletion(partitions)
+  } yield ()
+
   def waitForCompaction(
       partitions: NonEmptySet[TopicPartition]
   )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Assertion] =
@@ -127,6 +153,15 @@ trait KafkaHelpers[F[_]] {
         messageKeys should not be empty
         messageKeys should contain theSameElementsAs messageKeys.toSet
       }
+    }
+
+  def waitForDeletion(
+      partitions: NonEmptySet[TopicPartition]
+  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Assertion] =
+    consumeEventually(partitions) { r =>
+      for {
+        records <- r
+      } yield records shouldBe empty
     }
 
   def consumeEventually(
