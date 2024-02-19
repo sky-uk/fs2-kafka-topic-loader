@@ -1,8 +1,7 @@
 package uk.sky.fs2.kafka.topicloader
 
-import cats.data.{NonEmptyList, NonEmptyMap, OptionT}
-import cats.effect.Async
-import cats.effect.kernel.Resource
+import cats.data.{NonEmptyList, NonEmptyMap}
+import cats.effect.{Async, Resource}
 import cats.syntax.all.*
 import cats.{Monad, Show}
 import fs2.kafka.instances.*
@@ -19,12 +18,12 @@ object TopicLoader extends TopicLoader {
   private[topicloader] given Show[LogOffsets] =
     Show.show(lo => s"LogOffset(highest=${lo.highest}, lowest=${lo.lowest})")
 
-  private[topicloader] given [K, V]: Show[ConsumerRecord[K, V]] =
-    Show.show(cr => s"${cr.topic}-${cr.partition}")
+  private case class PartitionLastOffset(topicPartition: TopicPartition, offset: Long)
 
   private case class HighestOffsetsWithRecord[K, V](
       partitionOffsets: Map[TopicPartition, Long],
-      consumerRecord: Option[ConsumerRecord[K, V]] = none[ConsumerRecord[K, V]]
+      consumerRecord: Option[ConsumerRecord[K, V]] = none[ConsumerRecord[K, V]],
+      partitionLastOffset: Option[PartitionLastOffset] = none[PartitionLastOffset]
   )
 
   private object WithRecord {
@@ -34,7 +33,7 @@ object TopicLoader extends TopicLoader {
 
 trait TopicLoader {
 
-  import TopicLoader.{*, given}
+  import TopicLoader.*
 
   /** Stream that loads the specified topics from the beginning and completes when the offsets reach the point specified
     * by the requested strategy.
@@ -79,34 +78,51 @@ trait TopicLoader {
       topics: NonEmptyList[String],
       strategy: LoadTopicStrategy,
       consumer: KafkaConsumer[F, K, V]
-  ): Stream[F, ConsumerRecord[K, V]] = Stream.eval {
+  ): Stream[F, ConsumerRecord[K, V]] =
+    for {
+      logOffsets <- Stream.eval(logOffsetsForTopics(topics, strategy, consumer)).flatMap(Stream.fromOption(_))
+      _          <- Stream.eval(assignOffsets(logOffsets, consumer))
+      record     <- consumer.records.map(_.record).through(filterBelowHighestOffset(logOffsets))
+    } yield record
+
+  private def assignOffsets[F[_] : Monad : LoggerFactory, K, V](
+      logOffsets: NonEmptyMap[TopicPartition, LogOffsets],
+      consumer: KafkaConsumer[F, K, V]
+  ): F[Unit] = {
     val logger = LoggerFactory[F].getLogger
-    {
-      for {
-        logOffsets <- OptionT(logOffsetsForTopics(topics, strategy, consumer))
-        _          <- OptionT.liftF(logger.debug(s"Log Offsets for topics: ${logOffsets.show}"))
-        _          <- OptionT.liftF(logger.debug(s"Assigning partitions: ${logOffsets.keys.mkString_(",")}"))
-        _          <- OptionT.liftF(consumer.assign(logOffsets.keys))
-        _          <- OptionT.liftF(logOffsets.toNel.traverse { (tp, o) =>
-                        logger.debug(s"Seeking to offset ${o.lowest} for partition ${tp.show}") *>
-                          consumer.seek(tp, o.lowest)
-                      })
-      } yield consumer.records.map(_.record).through(filterBelowHighestOffset(logOffsets))
-    }.getOrElse(Stream.empty)
-  }.flatten
+    for {
+      _ <- logger.debug(s"Assigning partitions: ${logOffsets.keys.mkString_(",")}")
+      _ <- consumer.assign(logOffsets.keys)
+      _ <- logOffsets.toNel.traverse { (tp, o) =>
+             logger.debug(s"Seeking to offset ${o.lowest} for partition ${tp.show}") *>
+               consumer.seek(tp, o.lowest)
+           }
+    } yield ()
+  }
 
   private def filterBelowHighestOffset[F[_] : Monad : LoggerFactory, K, V](
       logOffsets: NonEmptyMap[TopicPartition, LogOffsets]
-  ): Pipe[F, ConsumerRecord[K, V], ConsumerRecord[K, V]] = {
-    val nonEmptyOffsets =
-      logOffsets.toSortedMap.filter((_, o) => o.highest > o.lowest)
+  ): Pipe[F, ConsumerRecord[K, V], ConsumerRecord[K, V]] = stream => {
+    val logger = LoggerFactory[F].getLogger
+
+    val (nonEmptyOffsets, emptyOffsets) =
+      logOffsets.toSortedMap.partition((_, o) => o.highest > o.lowest)
 
     val allHighestOffsets: HighestOffsetsWithRecord[K, V] =
       HighestOffsetsWithRecord[K, V](nonEmptyOffsets.map((p, o) => p -> (o.highest - 1)))
 
-    _.evalScan(allHighestOffsets)(emitRecordRemovingConsumedPartition[F, K, V])
-      .takeWhile(_.partitionOffsets.nonEmpty, takeFailure = true)
-      .collect { case WithRecord(r) => r }
+    Stream.eval {
+      emptyOffsets.toList.traverse { (tp, o) =>
+        logger.info(s"Not loading data from empty ${tp.show} at offset ${o.highest}")
+      }
+    } >>
+      stream
+        .scan(allHighestOffsets)(emitRecordRemovingConsumedPartition[K, V])
+        .takeWhile(_.partitionOffsets.nonEmpty, takeFailure = true)
+        .evalTapChunk(_.partitionLastOffset.traverse { last =>
+          logger.info(s"Finished loading data from ${last.topicPartition.show} at offset ${last.offset}")
+        })
+        .collect { case WithRecord(r) => r }
   }
 
   private def logOffsetsForTopics[F[_] : Async, K, V](
@@ -148,23 +164,34 @@ trait TopicLoader {
       partitionInfo <- topics.toList.flatTraverse(consumer.partitionsFor)
     } yield partitionInfo.map(pi => TopicPartition(pi.topic, pi.partition)).toSet
 
-  private def emitRecordRemovingConsumedPartition[F[_] : Monad : LoggerFactory, K, V](
+  private def emitRecordRemovingConsumedPartition[K, V](
       t: HighestOffsetsWithRecord[K, V],
       r: ConsumerRecord[K, V]
-  ): F[HighestOffsetsWithRecord[K, V]] = {
-    val logger = LoggerFactory[F].getLogger
-
+  ): HighestOffsetsWithRecord[K, V] = {
     val partitionHighest: Option[Long] = t.partitionOffsets.get(TopicPartition(r.topic, r.partition))
 
-    val reachedHighest: OptionT[F, TopicPartition] = for {
-      offset  <- OptionT.fromOption[F](partitionHighest)
-      highest <- OptionT.fromOption[F](if (r.offset >= offset) TopicPartition(r.topic, r.partition).some else None)
-      _       <- OptionT.liftF(logger.warn(s"Finished loading data from ${r.show} at offset ${r.offset}"))
+    val reachedHighest: Option[TopicPartition] = for {
+      offset  <- partitionHighest
+      highest <- Option.when(r.offset >= offset)(TopicPartition(r.topic, r.partition))
     } yield highest
 
-    val updatedHighests = reachedHighest.fold(t.partitionOffsets)(highest => t.partitionOffsets - highest)
     val emittableRecord = partitionHighest.collect { case h if r.offset <= h => r }
-    updatedHighests.map(HighestOffsetsWithRecord(_, emittableRecord))
+
+    reachedHighest match {
+      case Some(highest) =>
+        HighestOffsetsWithRecord(
+          partitionOffsets = t.partitionOffsets - highest,
+          consumerRecord = emittableRecord,
+          partitionLastOffset = PartitionLastOffset(highest, r.offset).some
+        )
+
+      case None =>
+        HighestOffsetsWithRecord(
+          partitionOffsets = t.partitionOffsets,
+          consumerRecord = emittableRecord,
+          partitionLastOffset = none[PartitionLastOffset]
+        )
+    }
   }
 
 }
