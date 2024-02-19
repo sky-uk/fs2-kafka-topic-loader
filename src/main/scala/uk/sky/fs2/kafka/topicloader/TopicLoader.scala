@@ -79,34 +79,48 @@ trait TopicLoader {
       topics: NonEmptyList[String],
       strategy: LoadTopicStrategy,
       consumer: KafkaConsumer[F, K, V]
-  ): Stream[F, ConsumerRecord[K, V]] = Stream.eval {
+  ): Stream[F, ConsumerRecord[K, V]] =
+    for {
+      logOffsets <- Stream.eval(logOffsetsForTopics(topics, strategy, consumer)).flatMap(Stream.fromOption(_))
+      _          <- Stream.eval(assignOffsets(logOffsets, consumer))
+      record     <- consumer.records.map(_.record).through(filterBelowHighestOffset(logOffsets))
+    } yield record
+
+  private def assignOffsets[F[_] : Monad : LoggerFactory, K, V](
+      logOffsets: NonEmptyMap[TopicPartition, LogOffsets],
+      consumer: KafkaConsumer[F, K, V]
+  ): F[Unit] = {
     val logger = LoggerFactory[F].getLogger
-    {
-      for {
-        logOffsets <- OptionT(logOffsetsForTopics(topics, strategy, consumer))
-        _          <- OptionT.liftF(logger.debug(s"Log Offsets for topics: ${logOffsets.show}"))
-        _          <- OptionT.liftF(logger.debug(s"Assigning partitions: ${logOffsets.keys.mkString_(",")}"))
-        _          <- OptionT.liftF(consumer.assign(logOffsets.keys))
-        _          <- OptionT.liftF(logOffsets.toNel.traverse { (tp, o) =>
-                        logger.debug(s"Seeking to offset ${o.lowest} for partition ${tp.show}") *>
-                          consumer.seek(tp, o.lowest)
-                      })
-      } yield consumer.records.map(_.record).through(filterBelowHighestOffset(logOffsets))
-    }.getOrElse(Stream.empty)
-  }.flatten
+    for {
+      _ <- logger.debug(s"Assigning partitions: ${logOffsets.keys.mkString_(",")}")
+      _ <- consumer.assign(logOffsets.keys)
+      _ <- logOffsets.toNel.traverse { (tp, o) =>
+             logger.debug(s"Seeking to offset ${o.lowest} for partition ${tp.show}") *>
+               consumer.seek(tp, o.lowest)
+           }
+    } yield ()
+  }
 
   private def filterBelowHighestOffset[F[_] : Monad : LoggerFactory, K, V](
       logOffsets: NonEmptyMap[TopicPartition, LogOffsets]
-  ): Pipe[F, ConsumerRecord[K, V], ConsumerRecord[K, V]] = {
-    val nonEmptyOffsets =
-      logOffsets.toSortedMap.filter((_, o) => o.highest > o.lowest)
+  ): Pipe[F, ConsumerRecord[K, V], ConsumerRecord[K, V]] = stream => {
+    val logger = LoggerFactory[F].getLogger
+
+    val (nonEmptyOffsets, emptyOffsets) =
+      logOffsets.toSortedMap.partition((_, o) => o.highest > o.lowest)
 
     val allHighestOffsets: HighestOffsetsWithRecord[K, V] =
       HighestOffsetsWithRecord[K, V](nonEmptyOffsets.map((p, o) => p -> (o.highest - 1)))
 
-    _.evalScan(allHighestOffsets)(emitRecordRemovingConsumedPartition[F, K, V])
-      .takeWhile(_.partitionOffsets.nonEmpty, takeFailure = true)
-      .collect { case WithRecord(r) => r }
+    Stream.eval {
+      emptyOffsets.toList.traverse { (tp, o) =>
+        logger.warn(s"Not loading data from empty ${tp.show} at offset ${o.highest}")
+      }
+    } >>
+      stream
+        .evalScan(allHighestOffsets)(emitRecordRemovingConsumedPartition[F, K, V])
+        .takeWhile(_.partitionOffsets.nonEmpty, takeFailure = true)
+        .collect { case WithRecord(r) => r }
   }
 
   private def logOffsetsForTopics[F[_] : Async, K, V](
