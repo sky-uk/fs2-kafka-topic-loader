@@ -1,8 +1,7 @@
 package uk.sky.fs2.kafka.topicloader
 
 import cats.data.{NonEmptyList, NonEmptyMap}
-import cats.effect.Async
-import cats.effect.kernel.Resource
+import cats.effect.{Async, Resource}
 import cats.syntax.all.*
 import cats.{Monad, Show}
 import fs2.kafka.instances.*
@@ -19,12 +18,12 @@ object TopicLoader extends TopicLoader {
   private[topicloader] given Show[LogOffsets] =
     Show.show(lo => s"LogOffset(highest=${lo.highest}, lowest=${lo.lowest})")
 
-  private case class PartitionLast(topicPartition: TopicPartition, offset: Long)
+  private case class PartitionLastOffset(topicPartition: TopicPartition, offset: Long)
 
   private case class HighestOffsetsWithRecord[K, V](
       partitionOffsets: Map[TopicPartition, Long],
       consumerRecord: Option[ConsumerRecord[K, V]] = none[ConsumerRecord[K, V]],
-      partitionLast: Option[PartitionLast] = none[PartitionLast]
+      partitionLastOffset: Option[PartitionLastOffset] = none[PartitionLastOffset]
   )
 
   private object WithRecord {
@@ -120,7 +119,7 @@ trait TopicLoader {
       stream
         .scan(allHighestOffsets)(emitRecordRemovingConsumedPartition[K, V])
         .takeWhile(_.partitionOffsets.nonEmpty, takeFailure = true)
-        .evalTapChunk(_.partitionLast.traverse { last =>
+        .evalTapChunk(_.partitionLastOffset.traverse { last =>
           logger.warn(s"Finished loading data from ${last.topicPartition.show} at offset ${last.offset}")
         })
         .collect { case WithRecord(r) => r }
@@ -183,14 +182,14 @@ trait TopicLoader {
         HighestOffsetsWithRecord(
           partitionOffsets = t.partitionOffsets - highest,
           consumerRecord = emittableRecord,
-          partitionLast = PartitionLast(highest, r.offset).some
+          partitionLastOffset = PartitionLastOffset(highest, r.offset).some
         )
 
       case None =>
         HighestOffsetsWithRecord(
           partitionOffsets = t.partitionOffsets,
           consumerRecord = emittableRecord,
-          partitionLast = none[PartitionLast]
+          partitionLastOffset = none[PartitionLastOffset]
         )
     }
   }
