@@ -113,14 +113,14 @@ trait TopicLoader {
 
     Stream.eval {
       emptyOffsets.toList.traverse { (tp, o) =>
-        logger.warn(s"Not loading data from empty ${tp.show} at offset ${o.highest}")
+        logger.info(s"Not loading data from empty ${tp.show} at offset ${o.highest}")
       }
     } >>
       stream
         .scan(allHighestOffsets)(emitRecordRemovingConsumedPartition[K, V])
         .takeWhile(_.partitionOffsets.nonEmpty, takeFailure = true)
         .evalTapChunk(_.partitionLastOffset.traverse { last =>
-          logger.warn(s"Finished loading data from ${last.topicPartition.show} at offset ${last.offset}")
+          logger.info(s"Finished loading data from ${last.topicPartition.show} at offset ${last.offset}")
         })
         .collect { case WithRecord(r) => r }
   }
