@@ -14,7 +14,7 @@ object Dependencies {
     lazy val kafka = "com.github.fd4s" %% "fs2-kafka" % "3.3.1"
   }
 
-  lazy val embeddedKafka     = "io.github.embeddedkafka" %% "embedded-kafka"                % "3.6.1"  % Test
+  lazy val embeddedKafka     = "io.github.embeddedkafka" %% "embedded-kafka"                % "3.7.0"  % Test
   lazy val scalaTest         = "org.scalatest"           %% "scalatest"                     % "3.2.18" % Test
   lazy val catsEffectTesting = "org.typelevel"           %% "cats-effect-testing-scalatest" % "1.5.0"  % Test
 
