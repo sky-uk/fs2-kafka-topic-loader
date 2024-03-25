@@ -5,6 +5,8 @@
         </encoder>
     </appender>
 
+    <logger name="uk.sky" level="${LOG_LEVEL:-INFO}" additivity="true"/>
+
     <root level="${LOG_LEVEL:-WARN}">
         <appender-ref ref="STDOUT"/>
     </root>

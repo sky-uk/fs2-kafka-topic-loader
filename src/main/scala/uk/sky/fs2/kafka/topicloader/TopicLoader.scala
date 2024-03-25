@@ -112,9 +112,15 @@ trait TopicLoader {
       HighestOffsetsWithRecord[K, V](nonEmptyOffsets.map((p, o) => p -> (o.highest - 1)))
 
     Stream.eval {
-      emptyOffsets.toList.traverse { (tp, o) =>
-        logger.info(s"Not loading data from empty ${tp.show} at offset ${o.highest}")
-      }
+      for {
+        _ <- logger.debug(s"Non-empty offsets: ${nonEmptyOffsets.toList.mkString_(", ")}")
+        _ <- logger.debug(s"Empty offsets: ${emptyOffsets.toList.mkString_(", ")}")
+        _ <- emptyOffsets.toList.traverse { (tp, o) =>
+               logger.info(
+                 s"Not loading data from ${tp.show} as lowest offset ${o.lowest} <= highest offset ${o.highest}"
+               )
+             }
+      } yield ()
     } >>
       stream
         .scan(allHighestOffsets)(emitRecordRemovingConsumedPartition[K, V])
