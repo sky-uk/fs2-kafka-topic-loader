@@ -5,8 +5,8 @@ object Dependencies {
   object Cats {
     lazy val core          = "org.typelevel" %% "cats-core"      % "2.10.0"
     lazy val effect        = "org.typelevel" %% "cats-effect"    % "3.5.4"
-    lazy val log4cats      = "org.typelevel" %% "log4cats-core"  % "2.6.0"
-    lazy val log4catsSlf4j = "org.typelevel" %% "log4cats-slf4j" % "2.6.0"
+    lazy val log4cats      = "org.typelevel" %% "log4cats-core"  % "2.7.0"
+    lazy val log4catsSlf4j = "org.typelevel" %% "log4cats-slf4j" % "2.7.0"
   }
 
   object Fs2 {
