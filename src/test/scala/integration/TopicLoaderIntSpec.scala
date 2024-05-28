@@ -32,6 +32,22 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         } yield result should contain theSameElementsAs (forTopic1 ++ forTopic2)
       }
 
+      "stream all records from all topics with chunks" in withKafkaContext { ctx =>
+        import ctx.embeddedKafkaConfig
+
+        val topics                 = NonEmptyList.of(testTopic1, testTopic2)
+        val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
+
+        for {
+          ref    <- Ref.of[IO, List[(String, String)]](List.empty)
+          _      <- createCustomTopics(topics)
+          _      <- publishStringMessages(testTopic1, forTopic1)
+          _      <- publishStringMessages(testTopic2, forTopic2)
+          _      <- runLoaderChunks(topics, strategy)(cr => ref.update(_ :+ recordToTuple(cr)))
+          result <- ref.get
+        } yield result should contain theSameElementsAs (forTopic1 ++ forTopic2)
+      }
+
       "stream available records even when one topic is empty" in withKafkaContext { ctx =>
         import ctx.given
 

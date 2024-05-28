@@ -1,12 +1,13 @@
 package uk.sky.fs2.kafka.topicloader
 
 import cats.data.{NonEmptyList, NonEmptyMap}
-import cats.effect.{Async, Resource}
+import cats.effect.Resource.ExitCase
+import cats.effect.{Async, Deferred, Ref, Resource}
 import cats.syntax.all.*
 import cats.{Monad, Show}
 import fs2.kafka.instances.*
 import fs2.kafka.{ConsumerRecord, ConsumerSettings, KafkaConsumer}
-import fs2.{Pipe, Stream}
+import fs2.{Chunk, Pipe, Stream}
 import org.apache.kafka.common.TopicPartition
 import org.typelevel.log4cats.LoggerFactory
 
@@ -74,6 +75,35 @@ trait TopicLoader {
         load(topics, LoadAll, consumer).onFinalizeCase(onLoad) ++ consumer.records.map(_.record)
       }
 
+  def loadChunks[F[_] : Async : LoggerFactory, K, V](
+      topics: NonEmptyList[String],
+      strategy: LoadTopicStrategy,
+      consumerSettings: ConsumerSettings[F, K, V]
+  )(process: Chunk[ConsumerRecord[K, V]] => F[Unit]): F[Unit] =
+    KafkaConsumer
+      .stream(consumerSettings)
+      .flatMap { consumer =>
+        loadChunks(topics, strategy, consumer)(process).drain
+      }
+      .compile
+      .drain
+
+  def loadAndRunChunks[F[_] : Async : LoggerFactory, K, V](
+      topics: NonEmptyList[String],
+      consumerSettings: ConsumerSettings[F, K, V]
+  )(process: Chunk[ConsumerRecord[K, V]] => F[Unit]): F[Nothing] =
+    KafkaConsumer
+      .stream(consumerSettings)
+      .flatMap { consumer =>
+        loadChunks(topics, LoadAll, consumer)(process).drain ++
+          consumer.partitionedStream
+            .map(_.chunks.map(_.map(_.record)).evalMap(process))
+            .parJoinUnbounded
+            .drain
+      }
+      .compile
+      .lastOrError
+
   private def load[F[_] : Async : LoggerFactory, K, V](
       topics: NonEmptyList[String],
       strategy: LoadTopicStrategy,
@@ -84,6 +114,69 @@ trait TopicLoader {
       _          <- Stream.eval(assignOffsets(logOffsets, consumer))
       record     <- consumer.records.map(_.record).through(filterBelowHighestOffset(logOffsets))
     } yield record
+
+  private def loadChunks[F[_] : Async : LoggerFactory, K, V](
+      topics: NonEmptyList[String],
+      strategy: LoadTopicStrategy,
+      consumer: KafkaConsumer[F, K, V]
+  )(process: Chunk[ConsumerRecord[K, V]] => F[Unit]): Stream[F, Chunk[ConsumerRecord[K, V]]] = {
+    val logger = LoggerFactory[F].getLogger
+
+    val partitionedFilteredRecords =
+      for {
+        logOffsets            <- Stream.eval(logOffsetsForTopics(topics, strategy, consumer)).flatMap(Stream.fromOption(_))
+        _                     <- Stream.eval(assignOffsets(logOffsets, consumer))
+        // Required as the partitionsMapStream only terminates on a rebalance, so we must interrupt ourselves
+        killSwitch            <- Stream.eval(Deferred[F, Either[Throwable, Unit]])
+        nonEmptyStreams       <- consumer.partitionsMapStream.interruptWhen(killSwitch).map { partitionMap =>
+                                   logOffsets.toNel.toList.flatMap { (tp, o) =>
+                                     partitionMap
+                                       .get(tp)
+                                       .map((_, tp, o))
+                                   }
+                                 }
+        totalStreamsRemaining <- Stream.eval(Ref.of[F, Int](nonEmptyStreams.size))
+        filteredRecords       <- Stream.emits {
+                                   nonEmptyStreams.map { (partitionedStream, tp, o) =>
+                                     val onComplete: F[Unit] = totalStreamsRemaining.flatModify { i =>
+                                       val newStreamsRemaining = i - 1
+
+                                       val finalize =
+                                         Async[F].whenA(newStreamsRemaining == 0) {
+                                           killSwitch.complete(().asRight) >> logger.debug("all inner streams complete")
+                                         }
+
+                                       val terminateOuterStreamIfAllComplete =
+                                         logger.debug(
+                                           s"inner stream for ${tp.show} complete, $newStreamsRemaining remaining"
+                                         ) >> finalize
+
+                                       (newStreamsRemaining, terminateOuterStreamIfAllComplete)
+                                     }
+
+                                     def onError(e: Throwable): F[Unit] =
+                                       for {
+                                         _ <- totalStreamsRemaining.set(0)
+                                         _ <- killSwitch.complete(e.asLeft).void
+                                         _ <- logger.error(e)(s"${tp.show} failed to load, terminating all streams: $e")
+                                       } yield ()
+
+                                     partitionedStream
+                                       .map(_.record)
+                                       .through(filterBelowHighestOffset(NonEmptyMap.one(tp, o)))
+                                       .chunks
+                                       .evalTap(process)
+                                       .onFinalizeCase {
+                                         // TODO - should a cancel be successful? It could happen on a rebalance, for which we'd want to terminate all partition's streams.
+                                         case ExitCase.Succeeded | ExitCase.Canceled => onComplete
+                                         case ExitCase.Errored(e)                    => onError(e)
+                                       }
+                                   }
+                                 }
+      } yield filteredRecords
+
+    partitionedFilteredRecords.parJoinUnbounded
+  }
 
   private def assignOffsets[F[_] : Monad : LoggerFactory, K, V](
       logOffsets: NonEmptyMap[TopicPartition, LogOffsets],
@@ -141,10 +234,11 @@ trait TopicLoader {
                                        case LoadAll       => consumer.endOffsets(topicPartitions)
                                        case LoadCommitted => earliestOffsets(consumer, beginningOffsetPerPartition)
                                      }
-      logOffsets                   = beginningOffsetPerPartition.map { (partition, offset) =>
-                                       partition -> LogOffsets(offset, endOffsets(partition))
+      logOffsets                  <- consumer.unsubscribe.as {
+                                       beginningOffsetPerPartition.map { (partition, offset) =>
+                                         partition -> LogOffsets(offset, endOffsets(partition))
+                                       }
                                      }
-      _                           <- consumer.unsubscribe
     } yield NonEmptyMap.fromMap(SortedMap.from(logOffsets))
 
   private def earliestOffsets[F[_] : Monad, K, V](

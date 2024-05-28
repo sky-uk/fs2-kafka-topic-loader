@@ -86,6 +86,19 @@ trait KafkaHelpers[F[_]] {
       )
   }
 
+  def runLoaderChunks(topics: NonEmptyList[String], strategy: LoadTopicStrategy)(
+      process: ConsumerRecord[String, String] => F[Unit]
+  )(using consumerSettings: ConsumerSettings[F, String, String], F: Async[F]): F[Unit] = {
+    given LoggerFactory[F] = Slf4jFactory.create[F]
+
+    TopicLoader
+      .loadChunks(topics, strategy, consumerSettings)(_.traverse_(process))
+      .timeoutTo(
+        patienceConfig.timeout,
+        F.raiseError(TestFailedException(s"TopicLoader did not complete after ${patienceConfig.timeout.toSeconds}s", 0))
+      )
+  }
+
   def loadAndRunR(topics: NonEmptyList[String])(
       onLoad: Resource.ExitCase => F[Unit],
       onRecord: ((String, String)) => F[Unit]
