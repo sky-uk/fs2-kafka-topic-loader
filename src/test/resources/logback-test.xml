@@ -10,5 +10,7 @@
     </root>
 
     <logger name="org.apache.kafka.common.metrics" level="OFF" additivity="false"/>
+    <logger name="org.apache.zookeeper.server.ServerCnxnFactory" level="OFF" additivity="false"/>
+    <logger name="kafka.server.BrokerMetadataCheckpoint" level="OFF" additivity="false"/>
 
 </configuration>

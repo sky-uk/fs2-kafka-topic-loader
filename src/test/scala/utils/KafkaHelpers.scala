@@ -41,7 +41,8 @@ trait KafkaHelpers[F[_]] {
     "cleanup.policy"            -> "compact",
     "delete.retention.ms"       -> "0",
     "min.cleanable.dirty.ratio" -> "0.01",
-    "segment.ms"                -> "1"
+    "segment.ms"                -> "1",
+    "segment.bytes"             -> "1000000"
   )
 
   val aggressiveDeletionConfig = Map(
@@ -56,15 +57,15 @@ trait KafkaHelpers[F[_]] {
 
   def recordToTuple[K, V](record: ConsumerRecord[K, V]): (K, V) = (record.key, record.value)
 
-  /*
-   * Note: Compaction is only triggered if messages are published as a separate statement.
-   */
+  /** @note
+    *   Compaction is only triggered if messages are published as a separate statement.
+    */
   def publishToKafkaAndTriggerCompaction(
       partitions: NonEmptySet[TopicPartition],
       messages: Seq[(String, String)]
   )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Unit] = {
     val topic      = partitions.map(_.topic()).toList.head
-    val fillerSize = 20
+    val fillerSize = 100
     val filler     = List.fill(fillerSize)(UUID.randomUUID().toString).map(x => (x, x))
 
     publishStringMessages(topic, messages) *> publishStringMessages(topic, filler)
@@ -176,9 +177,9 @@ trait KafkaHelpers[F[_]] {
         offsetReset = AutoOffsetReset.Earliest,
         partitions,
         groupId.some
-      )(_.records.map(_.record).interruptAfter(5.second).compile.toList)
+      )(_.records.map(_.record).interruptAfter(5.seconds).compile.toList)
 
-      f(records.map(_.map(r => r.key -> r.value)))
+      f(records.map(_.map(recordToTuple)))
     }
 
   def withAssignedConsumer[T](
