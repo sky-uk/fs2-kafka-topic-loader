@@ -2,8 +2,7 @@ package load
 
 import cats.Traverse
 import cats.data.NonEmptyList
-import cats.effect.Ref
-import cats.effect.kernel.Async
+import cats.effect.{Async, Ref}
 import cats.syntax.all.*
 import fs2.kafka.*
 import fs2.{Pipe, Stream}

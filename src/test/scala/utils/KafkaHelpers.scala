@@ -4,9 +4,9 @@ import java.util.UUID
 
 import base.AsyncIntSpec
 import cats.data.{NonEmptyList, NonEmptySet}
-import cats.effect.kernel.Fiber
+import cats.effect.std.Supervisor
 import cats.effect.syntax.all.*
-import cats.effect.{Async, Resource}
+import cats.effect.{Async, Fiber, Resource}
 import cats.syntax.all.*
 import fs2.Stream
 import fs2.kafka.{AutoOffsetReset, ConsumerRecord, ConsumerSettings, KafkaConsumer}
@@ -93,14 +93,18 @@ trait KafkaHelpers[F[_]] {
   )(using
       consumerSettings: ConsumerSettings[F, String, String],
       F: Async[F]
-  ): Resource[F, Fiber[F, Throwable, Unit]] = Resource.make {
-    loadAndRunLoader(topics)(onLoad)
-      .map(recordToTuple)
-      .evalTap(onRecord)
-      .compile
-      .drain
-      .start
-  }(_.cancel.void)
+  ): Resource[F, Fiber[F, Throwable, Unit]] =
+    Supervisor[F]
+      .evalMap(supervisor =>
+        supervisor.supervise(
+          loadAndRunLoader(topics)(onLoad)
+            .map(recordToTuple)
+            .evalTap(onRecord)
+            .compile
+            .drain
+            .void
+        )
+      )
 
   def loadAndRunLoader(topics: NonEmptyList[String])(onLoad: Resource.ExitCase => F[Unit])(using
       consumerSettings: ConsumerSettings[F, String, String],
