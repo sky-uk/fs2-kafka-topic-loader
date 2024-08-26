@@ -6,7 +6,7 @@ import base.AsyncIntSpec
 import cats.data.{NonEmptyList, NonEmptySet}
 import cats.effect.std.Supervisor
 import cats.effect.syntax.all.*
-import cats.effect.{Async, Fiber, Resource}
+import cats.effect.{Async, Resource}
 import cats.syntax.all.*
 import fs2.Stream
 import fs2.kafka.{AutoOffsetReset, ConsumerRecord, ConsumerSettings, KafkaConsumer}
@@ -93,16 +93,17 @@ trait KafkaHelpers[F[_]] {
   )(using
       consumerSettings: ConsumerSettings[F, String, String],
       F: Async[F]
-  ): Resource[F, Fiber[F, Throwable, Unit]] =
-    Supervisor[F].evalMap(_.supervise {
-      loadAndRunLoader(topics)(onLoad)
-        .debug()
-        .map(recordToTuple)
-        .evalTap(onRecord)
-        .compile
-        .drain
-        .void
-    })
+  ): Resource[F, Unit] =
+    Supervisor[F]
+      .evalMap(_.supervise {
+        loadAndRunLoader(topics)(onLoad)
+          .debug()
+          .map(recordToTuple)
+          .evalTap(onRecord)
+          .compile
+          .drain
+      })
+      .void
 
   def loadAndRunLoader(topics: NonEmptyList[String])(onLoad: Resource.ExitCase => F[Unit])(using
       consumerSettings: ConsumerSettings[F, String, String],
