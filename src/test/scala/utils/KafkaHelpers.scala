@@ -4,9 +4,9 @@ import java.util.UUID
 
 import base.AsyncIntSpec
 import cats.data.{NonEmptyList, NonEmptySet}
-import cats.effect.kernel.Fiber
+import cats.effect.std.Supervisor
 import cats.effect.syntax.all.*
-import cats.effect.{Async, Resource}
+import cats.effect.{Async, Fiber, Resource}
 import cats.syntax.all.*
 import fs2.Stream
 import fs2.kafka.{AutoOffsetReset, ConsumerRecord, ConsumerSettings, KafkaConsumer}
@@ -41,7 +41,8 @@ trait KafkaHelpers[F[_]] {
     "cleanup.policy"            -> "compact",
     "delete.retention.ms"       -> "0",
     "min.cleanable.dirty.ratio" -> "0.01",
-    "segment.ms"                -> "1"
+    "segment.ms"                -> "1",
+    "segment.bytes"             -> "500000" // 500 KB
   )
 
   val aggressiveDeletionConfig = Map(
@@ -64,7 +65,7 @@ trait KafkaHelpers[F[_]] {
       messages: Seq[(String, String)]
   )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Unit] = {
     val topic      = partitions.map(_.topic()).toList.head
-    val fillerSize = 20
+    val fillerSize = 100
     val filler     = List.fill(fillerSize)(UUID.randomUUID().toString).map(x => (x, x))
 
     publishStringMessages(topic, messages) *> publishStringMessages(topic, filler)
@@ -92,14 +93,16 @@ trait KafkaHelpers[F[_]] {
   )(using
       consumerSettings: ConsumerSettings[F, String, String],
       F: Async[F]
-  ): Resource[F, Fiber[F, Throwable, Unit]] = Resource.make {
-    loadAndRunLoader(topics)(onLoad)
-      .map(recordToTuple)
-      .evalTap(onRecord)
-      .compile
-      .drain
-      .start
-  }(_.cancel.void)
+  ): Resource[F, Fiber[F, Throwable, Unit]] =
+    Supervisor[F].evalMap(_.supervise {
+      loadAndRunLoader(topics)(onLoad)
+        .debug()
+        .map(recordToTuple)
+        .evalTap(onRecord)
+        .compile
+        .drain
+        .void
+    })
 
   def loadAndRunLoader(topics: NonEmptyList[String])(onLoad: Resource.ExitCase => F[Unit])(using
       consumerSettings: ConsumerSettings[F, String, String],
@@ -148,7 +151,7 @@ trait KafkaHelpers[F[_]] {
     consumeEventually(partitions) { r =>
       for {
         records    <- r
-        messageKeys = records.map { case (k, _) => k }
+        messageKeys = records.map((k, _) => k)
       } yield {
         messageKeys should not be empty
         messageKeys should contain theSameElementsAs messageKeys.toSet

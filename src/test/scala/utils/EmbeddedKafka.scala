@@ -11,10 +11,11 @@ import org.apache.kafka.common.TopicPartition
 
 trait EmbeddedKafka[F[_]] {
 
+  // TODO - remove and change int tests
   def embeddedKafkaConfigF(implicit F: Sync[F]): F[EmbeddedKafkaConfig] = for {
     kafkaPort     <- RandomPort[F]
     zooKeeperPort <- RandomPort[F]
-  } yield EmbeddedKafkaConfig(kafkaPort, zooKeeperPort, customBrokerProperties = Map("log.roll.ms" -> "10"))
+  } yield EmbeddedKafkaConfig(kafkaPort = 9092, customBrokerProperties = Map("log.roll.ms" -> "10"))
 
   def embeddedKafkaR(kafkaConfig: EmbeddedKafkaConfig)(using F: Async[F]): Resource[F, KafkaServer] =
     Resource.make(F.blocking(Underlying.start()(kafkaConfig).broker))(server => F.blocking(server.shutdown()).void)
@@ -51,7 +52,7 @@ trait EmbeddedKafka[F[_]] {
       kafkaConfig: EmbeddedKafkaConfig,
       F: Async[F]
   ): F[Unit] =
-    messages.traverse { case (k, v) => publishStringMessage(topic, k, v) }.void
+    messages.traverse((k, v) => publishStringMessage(topic, k, v)).void
 
   def consumeStringMessage(topic: String, autoCommit: Boolean)(using
       kafkaConfig: EmbeddedKafkaConfig,
