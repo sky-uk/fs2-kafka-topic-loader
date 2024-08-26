@@ -3,12 +3,13 @@ package utils
 import cats.data.{NonEmptyList, NonEmptySet}
 import cats.effect.{Async, Resource, Sync}
 import cats.syntax.all.*
+import fs2.kafka.*
 import fs2.kafka.instances.*
-import io.github.embeddedkafka.Codecs.stringSerializer
 import io.github.embeddedkafka.{EmbeddedKafka as Underlying, EmbeddedKafkaConfig}
 import kafka.server.KafkaServer
 import org.apache.kafka.common.TopicPartition
 
+// TODO - completely remove embedded kafka and use FS2 Kafka
 trait EmbeddedKafka[F[_]] {
 
   // TODO - remove and change int tests
@@ -42,17 +43,35 @@ trait EmbeddedKafka[F[_]] {
   )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[NonEmptySet[TopicPartition]] =
     topics.flatTraverse(createCustomTopic(_, partitions, topicConfig)).map(_.toNes)
 
+  private def producerSettings(using
+      kafkaConfig: EmbeddedKafkaConfig,
+      F: Async[F]
+  ): ProducerSettings[F, String, String] =
+    ProducerSettings[F, String, String]
+      .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
+
+  private def publish(
+      pr: ProducerRecord[String, String]*
+  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Unit] =
+    KafkaProducer.resource(producerSettings).use { producer =>
+      producer.produce(ProducerRecords(pr.toList)).flatten.void
+    }
+
   def publishStringMessage(topic: String, key: String, message: String)(using
       kafkaConfig: EmbeddedKafkaConfig,
       F: Async[F]
-  ): F[Unit] =
-    F.blocking(Underlying.publishToKafka(topic, key, message))
+  ): F[Unit] = {
+    val record = ProducerRecord(topic, key, message)
+    publish(record)
+  }
 
   def publishStringMessages(topic: String, messages: Seq[(String, String)])(using
       kafkaConfig: EmbeddedKafkaConfig,
       F: Async[F]
-  ): F[Unit] =
-    messages.traverse((k, v) => publishStringMessage(topic, k, v)).void
+  ): F[Unit] = {
+    val records = messages.map((k, v) => ProducerRecord(topic, k, v))
+    publish(records*)
+  }
 
   def consumeStringMessage(topic: String, autoCommit: Boolean)(using
       kafkaConfig: EmbeddedKafkaConfig,
