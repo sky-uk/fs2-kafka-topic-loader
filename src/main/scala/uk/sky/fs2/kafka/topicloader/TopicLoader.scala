@@ -71,7 +71,9 @@ trait TopicLoader {
     KafkaConsumer
       .stream(consumerSettings)
       .flatMap { consumer =>
-        load(topics, LoadAll, consumer).onFinalizeCase(onLoad) ++ consumer.records.map(_.record)
+        load(topics, LoadAll, consumer).onFinalizeCase(onLoad) ++
+          (Stream.eval(consumer.assignment).evalMap(assignment => Async[F].delay(println(s"assigned: $assignment"))) >>
+            consumer.records.map(_.record))
       }
 
   private def load[F[_] : Async : LoggerFactory, K, V](
