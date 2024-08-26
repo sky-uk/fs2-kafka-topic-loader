@@ -97,7 +97,7 @@ trait KafkaHelpers[F[_]] {
     Supervisor[F]
       .evalMap(_.supervise {
         loadAndRunLoader(topics)(onLoad)
-          .debug()
+          .debug() // TODO - remove
           .map(recordToTuple)
           .evalTap(onRecord)
           .compile
