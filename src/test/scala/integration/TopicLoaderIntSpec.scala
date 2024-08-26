@@ -206,10 +206,9 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO], KafkaTestContainer[IO] {
             _         <- eventually(topicState.get.asserting(_ should contain theSameElementsAs preLoad))
             _         <- eventually(loadState.get.asserting(_ shouldBe true))
             _         <- publishStringMessages(testTopic1, postLoad)
-            assertion <-
-              eventually(
-                topicState.get.asserting(_ should contain theSameElementsAs (preLoad ++ postLoad))
-              )
+            assertion <- eventually(
+                           topicState.get.asserting(_ should contain theSameElementsAs (preLoad ++ postLoad))
+                         )
           } yield assertion
         }
 
@@ -236,10 +235,9 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO], KafkaTestContainer[IO] {
           for {
             _         <- eventually(loadState.get.asserting(_ shouldBe true))
             _         <- publishStringMessages(testTopic1, postLoad)
-            assertion <-
-              eventually(
-                topicState.get.asserting(_ should contain theSameElementsAs postLoad)
-              )
+            assertion <- eventually(
+                           topicState.get.asserting(_ should contain theSameElementsAs postLoad)
+                         )
           } yield assertion
         }
 
@@ -251,6 +249,17 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO], KafkaTestContainer[IO] {
       } yield assertion
     }
 
+    /** TODO - seems to consistently not consume the second batch of messages. Need to check if this is a bug with how
+      * we publish - not likely due to logs: Chunk((ProducerRecord(topic = load-state-topic-2, key = k11, value =
+      * v11),load-state-topic-2-0@0), (ProducerRecord(topic = load-state-topic-2, key = k12, value =
+      * v12),load-state-topic-2-1@0), (ProducerRecord(topic = load-state-topic-2, key = k13, value =
+      * v13),load-state-topic-2-0@1), (ProducerRecord(topic = load-state-topic-2, key = k14, value =
+      * v14),load-state-topic-2-1@1), (ProducerRecord(topic = load-state-topic-2, key = k15, value =
+      * v15),load-state-topic-2-0@2))
+      *
+      * So either it was passing incorrectly before, and `loadAndRun` doesn't actually read from empty topics in the
+      * post load state, or something is wrong with our Kafka setup.
+      */
     "execute callback if one topic is empty and keep streaming" in withKafkaContext { implicit kafkaConfig =>
       val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
       val topics                 = NonEmptyList.of(testTopic1, testTopic2)
@@ -266,11 +275,10 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO], KafkaTestContainer[IO] {
           for {
             _         <- eventually(topicState.get.asserting(_ should contain theSameElementsAs forTopic1))
             _         <- eventually(loadState.get.asserting(_ shouldBe true))
-            _         <- publishStringMessages(testTopic2, forTopic2)
-            assertion <-
-              eventually(
-                topicState.get.asserting(_ should contain theSameElementsAs (forTopic1 ++ forTopic2))
-              )
+            _         <- publishStringMessages(testTopic2, forTopic2) // TODO - these aren't being read
+            assertion <- eventually(
+                           topicState.get.asserting(_ should contain theSameElementsAs (forTopic1 ++ forTopic2))
+                         )
           } yield assertion
         }
 

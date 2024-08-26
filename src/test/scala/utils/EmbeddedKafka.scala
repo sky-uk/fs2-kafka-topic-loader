@@ -53,7 +53,7 @@ trait EmbeddedKafka[F[_]] {
       pr: ProducerRecord[String, String]*
   )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Unit] =
     KafkaProducer.resource(producerSettings).use { producer =>
-      producer.produce(ProducerRecords(pr.toList)).flatten.void
+      producer.produce(ProducerRecords(pr.toList)).flatten.flatTap(pr => F.delay(println(s"got result: $pr"))).void
     }
 
   def publishStringMessage(topic: String, key: String, message: String)(using
