@@ -7,7 +7,10 @@ import fs2.kafka.*
 import fs2.kafka.instances.*
 import io.github.embeddedkafka.{EmbeddedKafka as Underlying, EmbeddedKafkaConfig}
 import kafka.server.KafkaServer
+import org.apache.kafka.clients.admin.NewTopic
 import org.apache.kafka.common.TopicPartition
+
+import scala.jdk.CollectionConverters.*
 
 // TODO - completely remove embedded kafka and use FS2 Kafka
 trait EmbeddedKafka[F[_]] {
@@ -26,15 +29,18 @@ trait EmbeddedKafka[F[_]] {
       F: Async[F]
   ): F[NonEmptyList[TopicPartition]] =
     for {
-      tpIndexes   <- F.fromOption(
-                       NonEmptyList.fromList((0 until partitions).toList),
-                       IllegalStateException(s"Partitions cannot be < 1 - got $partitions")
-                     )
-      maybeCreate <- F.blocking {
-                       Underlying.createCustomTopic(topic = topic, topicConfig = topicConfig, partitions = partitions)
-                     }
-      _           <- F.fromTry(maybeCreate)
-    } yield tpIndexes.map(TopicPartition(topic, _))
+      tpIndexes <- F.fromOption(
+                     NonEmptyList.fromList((0 until partitions).toList),
+                     IllegalStateException(s"Partitions cannot be < 1 - got $partitions")
+                   )
+      topic     <- KafkaAdminClient.resource(adminClientSettings).use { adminClient =>
+                     for {
+                       topic <- F.delay(NewTopic(topic, partitions, 1: Short))
+                       _     <- F.delay(topic.configs(topicConfig.asJava))
+                       _     <- adminClient.createTopic(topic)
+                     } yield topic
+                   }
+    } yield tpIndexes.map(TopicPartition(topic.name(), _))
 
   def createCustomTopics(
       topics: NonEmptyList[String],
@@ -42,13 +48,6 @@ trait EmbeddedKafka[F[_]] {
       topicConfig: Map[String, String] = Map.empty
   )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[NonEmptySet[TopicPartition]] =
     topics.flatTraverse(createCustomTopic(_, partitions, topicConfig)).map(_.toNes)
-
-  private def producerSettings(using
-      kafkaConfig: EmbeddedKafkaConfig,
-      F: Async[F]
-  ): ProducerSettings[F, String, String] =
-    ProducerSettings[F, String, String]
-      .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
 
   private def publish(
       pr: ProducerRecord[String, String]*
@@ -78,5 +77,15 @@ trait EmbeddedKafka[F[_]] {
       F: Async[F]
   ): F[String] =
     F.blocking(Underlying.consumeFirstStringMessageFrom(topic, autoCommit = autoCommit))
+
+  private def producerSettings(using
+      kafkaConfig: EmbeddedKafkaConfig,
+      F: Sync[F]
+  ): ProducerSettings[F, String, String] =
+    ProducerSettings[F, String, String]
+      .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
+
+  private def adminClientSettings(using kafkaConfig: EmbeddedKafkaConfig): AdminClientSettings =
+    AdminClientSettings(s"localhost:${kafkaConfig.kafkaPort}")
 
 }
