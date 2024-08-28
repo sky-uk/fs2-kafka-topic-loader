@@ -82,6 +82,8 @@ trait EmbeddedKafka[F[_]] {
     ConsumerSettings[F, String, String]
       .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
       .withEnableAutoCommit(autoCommit)
+      .withGroupId("test-consumer")
+      .withAutoOffsetReset(AutoOffsetReset.Earliest)
 
   private def producerSettings(using kafkaConfig: KafkaConfig, F: Sync[F]): ProducerSettings[F, String, String] =
     ProducerSettings[F, String, String]

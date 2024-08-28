@@ -120,7 +120,7 @@ trait KafkaHelpers[F[_]] {
       autoCommit = true,
       offsetReset = AutoOffsetReset.Latest,
       partitions = partitions,
-      groupId = groupId.some
+      groupId = groupId
     )(
       _.evalMap(consumer =>
         for {
@@ -179,7 +179,7 @@ trait KafkaHelpers[F[_]] {
         autoCommit = false,
         offsetReset = AutoOffsetReset.Earliest,
         partitions,
-        groupId.some
+        groupId
       )(_.records.map(_.record).interruptAfter(5.second).compile.toList)
 
       f(records.map(_.map(r => r.key -> r.value)))
@@ -189,7 +189,7 @@ trait KafkaHelpers[F[_]] {
       autoCommit: Boolean,
       offsetReset: AutoOffsetReset,
       partitions: NonEmptySet[TopicPartition],
-      groupId: Option[String] = None
+      groupId: String = UUID.randomUUID().toString
   )(f: Stream[F, KafkaConsumer[F, String, String]] => T)(using kafkaConfig: KafkaConfig, F: Async[F]): T = {
     val consumer = createConsumer(autoCommit, offsetReset, groupId)
 
@@ -208,15 +208,15 @@ trait KafkaHelpers[F[_]] {
   def createConsumer(
       autoCommit: Boolean,
       offsetReset: AutoOffsetReset,
-      groupId: Option[String]
+      groupId: String
   )(implicit kafkaConfig: KafkaConfig, F: Async[F]): Resource[F, KafkaConsumer[F, String, String]] = {
-    val baseSettings =
+    val settings =
       ConsumerSettings[F, String, String]
         .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
         .withEnableAutoCommit(autoCommit)
         .withAutoOffsetReset(offsetReset)
+        .withGroupId(groupId)
 
-    val settings = groupId.fold(baseSettings)(baseSettings.withGroupId)
     KafkaConsumer[F].resource(settings)
   }
 }

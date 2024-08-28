@@ -4,43 +4,48 @@ import base.KafkaSpecBase
 import cats.data.NonEmptyList
 import cats.effect.{IO, Ref}
 import fs2.kafka.*
-import io.github.embeddedkafka.EmbeddedKafkaConfig
 import load.LoadExample
 import org.scalatest.Assertion
 import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.slf4j.Slf4jFactory
+import utils.KafkaContainer.KafkaConfig
+import utils.KafkaTestContainer
 
 import scala.concurrent.duration.*
 
-final class LoadExampleIntSpec extends KafkaSpecBase[IO] {
+final class LoadExampleIntSpec extends KafkaSpecBase[IO], KafkaTestContainer[IO] {
 
   "LoadExample" should {
-    "load previously seen messages into the store" in withKafkaContext { ctx =>
-      import ctx.{*, given}
+    "load previously seen messages into the store" in withKafkaContext { implicit kafkaConfig =>
+      testContext { ctx =>
+        import ctx.*
 
-      for {
-        _      <- publishStringMessage(inputTopic, "key1", "value1")
-        _      <- runAppAndDiscard
-        _      <- publishStringMessage(inputTopic, "key2", "value2")
-        result <- runApp
-      } yield result should contain theSameElementsInOrderAs List("value1", "value2")
+        for {
+          _      <- publishStringMessage(inputTopic, "key1", "value1")
+          _      <- runAppAndDiscard
+          _      <- publishStringMessage(inputTopic, "key2", "value2")
+          result <- runApp
+        } yield result should contain theSameElementsInOrderAs List("value1", "value2")
+      }
     }
 
-    "not publish previously committed messages" in withKafkaContext { ctx =>
-      import ctx.{*, given}
+    "not publish previously committed messages" in withKafkaContext { implicit kafkaConfig =>
+      testContext { ctx =>
+        import ctx.*
 
-      for {
-        _      <- publishStringMessage(inputTopic, "key1", "value1")
-        _      <- runAppAndDiscard
-        _      <- consumeStringMessage(outputTopic, autoCommit = true)
-        _      <- publishStringMessage(inputTopic, "key2", "value2")
-        _      <- runAppAndDiscard
-        result <- consumeStringMessage(outputTopic, autoCommit = true)
-      } yield result shouldBe "value2"
+        for {
+          _      <- publishStringMessage(inputTopic, "key1", "value1")
+          _      <- runAppAndDiscard
+          _      <- consumeStringMessage(outputTopic, autoCommit = true)
+          _      <- publishStringMessage(inputTopic, "key2", "value2")
+          _      <- runAppAndDiscard
+          result <- consumeStringMessage(outputTopic, autoCommit = true)
+        } yield result shouldBe "value2"
+      }
     }
   }
 
-  private trait TestContext {
+  final case class TestContext()(using kafkaConfig: KafkaConfig) {
 
     private val store: IO[Ref[IO, List[String]]] = Ref.empty
 
@@ -49,11 +54,15 @@ final class LoadExampleIntSpec extends KafkaSpecBase[IO] {
 
     private given LoggerFactory[IO] = Slf4jFactory.create[IO]
 
-    given kafkaConfig: EmbeddedKafkaConfig
+    given consumerSettings(using kafkaConfig: KafkaConfig): ConsumerSettings[IO, String, String] =
+      ConsumerSettings[IO, String, String]
+        .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
+        .withAutoOffsetReset(AutoOffsetReset.Earliest)
+        .withGroupId("load-example-consumer-group")
 
-    val consumerSettings: ConsumerSettings[IO, String, String]
-
-    val producerSettings: ProducerSettings[IO, String, String]
+    given producerSettings(using kafkaConfig: KafkaConfig): ProducerSettings[IO, String, String] =
+      ProducerSettings[IO, String, String]
+        .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
 
     val runApp: IO[List[String]] =
       for {
@@ -61,8 +70,6 @@ final class LoadExampleIntSpec extends KafkaSpecBase[IO] {
         example1 = LoadExample.kafka[IO](
                      topics = NonEmptyList.one(inputTopic),
                      outputTopic = outputTopic,
-                     consumerSettings = consumerSettings,
-                     producerSettings = producerSettings,
                      store = store
                    )
         _       <- example1.stream
@@ -75,22 +82,9 @@ final class LoadExampleIntSpec extends KafkaSpecBase[IO] {
     val runAppAndDiscard: IO[Unit] = runApp.void
   }
 
-  private def withKafkaContext(test: TestContext => IO[Assertion]): IO[Assertion] =
-    for {
-      config     <- embeddedKafkaConfigF
-      testContext = new TestContext {
-                      override given kafkaConfig: EmbeddedKafkaConfig = config
+  private def testContext(test: TestContext => IO[Assertion])(using KafkaConfig): IO[Assertion] = {
+    val testContext = TestContext()
 
-                      override val consumerSettings: ConsumerSettings[IO, String, String] =
-                        ConsumerSettings[IO, String, String]
-                          .withBootstrapServers(s"localhost:${config.kafkaPort}")
-                          .withAutoOffsetReset(AutoOffsetReset.Earliest)
-                          .withGroupId("load-example-consumer-group")
-
-                      override val producerSettings: ProducerSettings[IO, String, String] =
-                        ProducerSettings[IO, String, String]
-                          .withBootstrapServers(s"localhost:${config.kafkaPort}")
-                    }
-      assertion  <- embeddedKafkaR(config).surround(test(testContext))
-    } yield assertion
+    test(testContext)
+  }
 }

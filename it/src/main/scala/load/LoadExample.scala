@@ -36,9 +36,10 @@ object LoadExample {
   def kafka[F[_] : Async : LoggerFactory](
       topics: NonEmptyList[String],
       outputTopic: String,
-      consumerSettings: ConsumerSettings[F, String, String],
-      producerSettings: ProducerSettings[F, String, String],
       store: Ref[F, List[String]]
+  )(using
+      consumerSettings: ConsumerSettings[F, String, String],
+      producerSettings: ProducerSettings[F, String, String]
   ): LoadExample[F, Message[F, *], Unit] = {
     val loadStream = TopicLoader.load[F, String, String](topics, LoadCommitted, consumerSettings).map(_.value)
 
