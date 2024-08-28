@@ -10,5 +10,8 @@
     </root>
 
     <logger name="org.apache.kafka.common.metrics" level="OFF" additivity="false"/>
+    <logger name="uk.sky" level="DEBUG">
+        <appender-ref ref="STDOUT"/>
+    </logger>
 
 </configuration>

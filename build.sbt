@@ -33,7 +33,6 @@ lazy val root = (project in file("."))
       Cats.log4catsSlf4j,
       Fs2.core,
       Fs2.kafka,
-      embeddedKafka,
       scalaTest,
       catsEffectTesting,
       logbackClassic,

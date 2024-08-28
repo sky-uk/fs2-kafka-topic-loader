@@ -10,7 +10,6 @@ import cats.effect.{Async, Resource}
 import cats.syntax.all.*
 import fs2.Stream
 import fs2.kafka.{AutoOffsetReset, ConsumerRecord, ConsumerSettings, KafkaConsumer}
-import io.github.embeddedkafka.EmbeddedKafkaConfig
 import org.apache.kafka.common.TopicPartition
 import org.scalatest.Assertion
 import org.scalatest.concurrent.AbstractPatienceConfiguration
@@ -18,6 +17,7 @@ import org.scalatest.exceptions.TestFailedException
 import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.slf4j.Slf4jFactory
 import uk.sky.fs2.kafka.topicloader.{LoadTopicStrategy, TopicLoader}
+import utils.KafkaContainer.KafkaConfig
 
 import scala.concurrent.duration.*
 
@@ -29,7 +29,7 @@ trait KafkaHelpers[F[_]] {
   val testTopic2 = "load-state-topic-2"
 
   given consumerSettings(using
-      kafkaConfig: EmbeddedKafkaConfig,
+      kafkaConfig: KafkaConfig,
       F: Async[F]
   ): ConsumerSettings[F, String, String] =
     ConsumerSettings[F, String, String]
@@ -63,7 +63,7 @@ trait KafkaHelpers[F[_]] {
   def publishToKafkaAndTriggerCompaction(
       partitions: NonEmptySet[TopicPartition],
       messages: Seq[(String, String)]
-  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Unit] = {
+  )(using kafkaConfig: KafkaConfig, F: Async[F]): F[Unit] = {
     val topic      = partitions.map(_.topic()).toList.head
     val fillerSize = 100
     val filler     = List.fill(fillerSize)(UUID.randomUUID().toString).map(x => (x, x))
@@ -115,7 +115,7 @@ trait KafkaHelpers[F[_]] {
 
   def moveOffsetToEnd(
       partitions: NonEmptySet[TopicPartition]
-  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): Stream[F, KafkaConsumer[F, String, String]] =
+  )(using kafkaConfig: KafkaConfig, F: Async[F]): Stream[F, KafkaConsumer[F, String, String]] =
     withAssignedConsumer(
       autoCommit = true,
       offsetReset = AutoOffsetReset.Latest,
@@ -133,7 +133,7 @@ trait KafkaHelpers[F[_]] {
   def publishToKafkaAndWaitForCompaction(
       partitions: NonEmptySet[TopicPartition],
       messages: Seq[(String, String)]
-  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Unit] = for {
+  )(using kafkaConfig: KafkaConfig, F: Async[F]): F[Unit] = for {
     _ <- publishToKafkaAndTriggerCompaction(partitions, messages)
     _ <- waitForCompaction(partitions)
   } yield ()
@@ -141,14 +141,14 @@ trait KafkaHelpers[F[_]] {
   def publishToKafkaAndWaitForDeletion(
       partitions: NonEmptySet[TopicPartition],
       messages: Seq[(String, String)]
-  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Unit] = for {
+  )(using kafkaConfig: KafkaConfig, F: Async[F]): F[Unit] = for {
     _ <- publishToKafkaAndTriggerCompaction(partitions, messages)
     _ <- waitForDeletion(partitions)
   } yield ()
 
   def waitForCompaction(
       partitions: NonEmptySet[TopicPartition]
-  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Assertion] =
+  )(using kafkaConfig: KafkaConfig, F: Async[F]): F[Assertion] =
     consumeEventually(partitions) { r =>
       for {
         records    <- r
@@ -161,7 +161,7 @@ trait KafkaHelpers[F[_]] {
 
   def waitForDeletion(
       partitions: NonEmptySet[TopicPartition]
-  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Assertion] =
+  )(using kafkaConfig: KafkaConfig, F: Async[F]): F[Assertion] =
     consumeEventually(partitions) { r =>
       for {
         records <- r
@@ -173,7 +173,7 @@ trait KafkaHelpers[F[_]] {
       groupId: String = UUID.randomUUID().toString
   )(
       f: F[List[(String, String)]] => F[Assertion]
-  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Assertion] =
+  )(using kafkaConfig: KafkaConfig, F: Async[F]): F[Assertion] =
     eventually {
       val records = withAssignedConsumer[F[List[ConsumerRecord[String, String]]]](
         autoCommit = false,
@@ -190,7 +190,7 @@ trait KafkaHelpers[F[_]] {
       offsetReset: AutoOffsetReset,
       partitions: NonEmptySet[TopicPartition],
       groupId: Option[String] = None
-  )(f: Stream[F, KafkaConsumer[F, String, String]] => T)(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): T = {
+  )(f: Stream[F, KafkaConsumer[F, String, String]] => T)(using kafkaConfig: KafkaConfig, F: Async[F]): T = {
     val consumer = createConsumer(autoCommit, offsetReset, groupId)
 
     val stream = Stream
@@ -209,7 +209,7 @@ trait KafkaHelpers[F[_]] {
       autoCommit: Boolean,
       offsetReset: AutoOffsetReset,
       groupId: Option[String]
-  )(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): Resource[F, KafkaConsumer[F, String, String]] = {
+  )(implicit kafkaConfig: KafkaConfig, F: Async[F]): Resource[F, KafkaConsumer[F, String, String]] = {
     val baseSettings =
       ConsumerSettings[F, String, String]
         .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
