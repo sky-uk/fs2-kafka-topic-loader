@@ -41,8 +41,7 @@ trait KafkaHelpers[F[_]] {
     "cleanup.policy"            -> "compact",
     "delete.retention.ms"       -> "0",
     "min.cleanable.dirty.ratio" -> "0.01",
-    "segment.ms"                -> "1",
-    "segment.bytes"             -> "500000" // 500 KB
+    "segment.ms"                -> "1"
   )
 
   val aggressiveDeletionConfig = Map(
