@@ -67,14 +67,30 @@ trait TopicLoader {
   def loadAndRun[F[_] : Async : LoggerFactory, K, V](
       topics: NonEmptyList[String],
       consumerSettings: ConsumerSettings[F, K, V]
-  )(onLoad: Resource.ExitCase => F[Unit]): Stream[F, ConsumerRecord[K, V]] =
+  )(onLoad: Resource.ExitCase => F[Unit]): Stream[F, ConsumerRecord[K, V]] = {
+    val logger = LoggerFactory[F].getLogger
+
     KafkaConsumer
       .stream(consumerSettings)
       .flatMap { consumer =>
-        load(topics, LoadAll, consumer).onFinalizeCase(onLoad) ++
-          (Stream.eval(consumer.assignment).evalMap(assignment => Async[F].delay(println(s"assigned: $assignment"))) >>
-            consumer.records.map(_.record))
+//        val printAssignment =
+//          consumer.assignment.flatMap(assignment => Async[F].delay(println(s"assigned: $assignment")))
+
+        val foo = for {
+          _          <- Stream.eval(consumer.unsubscribe)
+          logOffsets <- Stream.eval(logOffsetsForTopics(topics, LoadAll, consumer)).flatMap(Stream.fromOption(_))
+          _          <- Stream.eval(consumer.subscribe(topics))
+          positions  <- Stream.eval(consumer.assignment)
+          _          <- Stream.eval(logOffsets.toNel.traverse { (tp, o) =>
+                          logger.debug(s"Seeking to offset ${o.highest} for partition ${tp.show}") *>
+                            consumer.seek(tp, o.highest) *> logger.debug("Seeked")
+                        })
+          record     <- consumer.records.debug(cr => s"inside stream: ${cr.toString}")
+        } yield record.record
+
+        load(topics, LoadAll, consumer).onFinalizeCase(onLoad) ++ foo
       }
+  }
 
   private def load[F[_] : Async : LoggerFactory, K, V](
       topics: NonEmptyList[String],

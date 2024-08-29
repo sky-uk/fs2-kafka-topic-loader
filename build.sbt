@@ -36,8 +36,7 @@ lazy val root = (project in file("."))
       scalaTest,
       catsEffectTesting,
       logbackClassic,
-      "com.dimafeng" %% "testcontainers-scala"       % "0.41.4" % Test,
-      "com.dimafeng" %% "testcontainers-scala-kafka" % "0.41.4" % Test
+      "org.testcontainers" % "kafka" % "1.20.1" % Test
     )
   )
 

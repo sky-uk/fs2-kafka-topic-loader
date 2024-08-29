@@ -28,8 +28,8 @@ object KafkaContainer {
     Resource.make {
       for {
         container <- F.pure(Underlying(DockerImageName.parse("confluentinc/cp-kafka:7.4.0")))
-        _         <- F.blocking(container.withKraft())
         _         <- F.blocking(container.start())
+        _         <- F.delay(println(s"bootstrap servers: ${container.getBootstrapServers}"))
         foundPort <-
           F.defer(
             container.getBootstrapServers

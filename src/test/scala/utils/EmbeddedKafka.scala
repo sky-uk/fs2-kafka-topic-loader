@@ -11,29 +11,31 @@ import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
 import utils.KafkaContainer.KafkaConfig
 
+import java.util.UUID
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
-// TODO - completely remove embedded kafka and use FS2 Kafka
 trait EmbeddedKafka[F[_]] {
+
+  private val groupId = UUID.randomUUID().toString
 
   def createCustomTopic(topic: String, partitions: Int, topicConfig: Map[String, String])(using
       kafkaConfig: KafkaConfig,
       F: Async[F]
   ): F[NonEmptyList[TopicPartition]] =
     for {
-      tpIndexes <- F.fromOption(
-                     NonEmptyList.fromList((0 until partitions).toList),
-                     IllegalStateException(s"Partitions cannot be < 1 - got $partitions")
-                   )
-      topic     <- KafkaAdminClient.resource(adminClientSettings).use { adminClient =>
-                     for {
-                       topic <- F.delay(NewTopic(topic, partitions, 1: Short))
-                       _     <- F.delay(topic.configs(topicConfig.asJava))
-                       _     <- adminClient.createTopic(topic)
-                     } yield topic
-                   }
-    } yield tpIndexes.map(TopicPartition(topic.name(), _))
+      topic      <- KafkaAdminClient.resource(adminClientSettings).use { adminClient =>
+                      for {
+                        topic <- F.delay(NewTopic(topic, partitions, 1: Short))
+                        _     <- F.delay(topic.configs(topicConfig.asJava))
+                        _     <- adminClient.createTopic(topic)
+                      } yield topic
+                    }
+      partitions <- F.fromOption(
+                      NonEmptyList.fromList((0 until topic.numPartitions()).toList),
+                      IllegalStateException(s"Partitions cannot be < 1 - got $partitions")
+                    )
+    } yield partitions.map(TopicPartition(topic.name(), _))
 
   def createCustomTopics(
       topics: NonEmptyList[String],
@@ -82,7 +84,7 @@ trait EmbeddedKafka[F[_]] {
     ConsumerSettings[F, String, String]
       .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
       .withEnableAutoCommit(autoCommit)
-      .withGroupId("test-consumer")
+      .withGroupId(groupId)
       .withAutoOffsetReset(AutoOffsetReset.Earliest)
 
   private def producerSettings(using kafkaConfig: KafkaConfig, F: Sync[F]): ProducerSettings[F, String, String] =
