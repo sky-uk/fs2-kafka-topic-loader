@@ -2,8 +2,8 @@ package utils
 
 import cats.effect.{Ref, Resource, Sync}
 import cats.syntax.all.*
-import org.testcontainers.containers.KafkaContainer as Underlying
 import org.scalatest.Assertion
+import org.testcontainers.containers.KafkaContainer as Underlying
 import org.testcontainers.utility.DockerImageName
 import utils.KafkaContainer.KafkaConfig
 
