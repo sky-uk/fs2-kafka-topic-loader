@@ -15,7 +15,7 @@ trait KafkaTestContainer[F[_]] {
 object KafkaContainer {
   final case class KafkaConfig(kafkaPort: Int)
 
-  trait Running[F[_]] {
+  sealed trait Running[F[_]] {
     def config: KafkaConfig
     def stop: F[Unit]
   }
@@ -44,13 +44,12 @@ object KafkaContainer {
         override def config: KafkaConfig = KafkaConfig(kafkaPort = foundPort)
 
         override def stop: F[Unit] =
-          stopped.flatModify { stopped =>
-            val maybeStop =
+          stopped
+            .getAndSet(true)
+            .flatMap(stopped =>
               if (stopped) RuntimeException("Container has already been shutdown").raiseError
               else F.blocking(container.stop())
-
-            true -> maybeStop
-          }
+            )
       }
     }(_.stop)
 }

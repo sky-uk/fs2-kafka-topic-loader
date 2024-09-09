@@ -1,5 +1,7 @@
 package utils
 
+import java.util.UUID
+
 import cats.data.{NonEmptyList, NonEmptySet}
 import cats.effect.syntax.all.*
 import cats.effect.{Async, Sync}
@@ -11,7 +13,6 @@ import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
 import utils.KafkaContainer.KafkaConfig
 
-import java.util.UUID
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
