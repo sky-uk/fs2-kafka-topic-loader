@@ -52,6 +52,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
       val strategy = LoadCommitted
 
+      // TODO - failing
       "stream all records up to the committed offset with LoadCommitted strategy" in withKafkaContext { ctx =>
         import ctx.given
 
@@ -61,12 +62,13 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         for {
           partitions <- createCustomTopics(topics)
           _          <- publishStringMessages(testTopic1, committed)
-          _          <- moveOffsetToEnd(partitions).compile.drain
+          _          <- moveOffsetToEnd(partitions)
           _          <- publishStringMessages(testTopic1, notCommitted)
           result     <- runLoader(topics, strategy)
         } yield result should contain theSameElementsAs committed
       }
 
+      // TODO - failing
       "stream available records even when one topic is empty" in withKafkaContext { ctx =>
         import ctx.given
 
@@ -76,12 +78,13 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         for {
           partitions <- createCustomTopics(topics)
           _          <- publishStringMessages(testTopic1, committed)
-          _          <- moveOffsetToEnd(partitions).compile.drain
+          _          <- moveOffsetToEnd(partitions)
           _          <- publishStringMessages(testTopic1, notCommitted)
           result     <- runLoader(topics, strategy)
         } yield result should contain theSameElementsAs committed
       }
 
+      // TODO - failing
       "work when highest offset is missing in log and there are messages after highest offset" in withKafkaContext {
         ctx =>
           import ctx.given
@@ -93,8 +96,11 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
             partitions <-
               createCustomTopics(NonEmptyList.one(testTopic1), partitions = 1, topicConfig = aggressiveCompactionConfig)
             _          <- publishStringMessages(testTopic1, published)
-            _          <- moveOffsetToEnd(partitions).compile.drain
-            _          <- publishToKafkaAndWaitForCompaction(partitions, toBeUpdated.map { case (k, v) => (k, v.reverse) })
+            _          <- moveOffsetToEnd(partitions)
+            _          <- publishToKafkaAndWaitForCompaction(partitions, toBeUpdated.map(_ -> _.reverse))
+            _          <- consumeEventually(partitions) { foo =>
+                            foo.flatMap(foo => IO.println(s"Got result: $foo")) >> foo.asserting(bar => bar should not be empty)
+                          }
             result     <- runLoader(NonEmptyList.one(testTopic1), strategy)
           } yield result should contain theSameElementsAs notUpdated
       }

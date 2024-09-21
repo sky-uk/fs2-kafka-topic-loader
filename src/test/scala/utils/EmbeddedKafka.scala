@@ -51,7 +51,7 @@ trait EmbeddedKafka[F[_]] {
       kafkaConfig: EmbeddedKafkaConfig,
       F: Async[F]
   ): F[Unit] =
-    messages.traverse { case (k, v) => publishStringMessage(topic, k, v) }.void
+    messages.traverse(publishStringMessage(topic, _, _)).void
 
   def consumeStringMessage(topic: String, autoCommit: Boolean)(using
       kafkaConfig: EmbeddedKafkaConfig,
