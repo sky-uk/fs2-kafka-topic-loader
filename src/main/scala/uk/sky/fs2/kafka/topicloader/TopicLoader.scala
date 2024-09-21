@@ -13,6 +13,7 @@ import org.typelevel.log4cats.syntax.*
 import org.typelevel.log4cats.{Logger, LoggerFactory}
 
 import scala.collection.immutable.SortedMap
+import scala.concurrent.duration.*
 
 object TopicLoader extends TopicLoader {
   private[topicloader] case class LogOffsets(lowest: Long, highest: Long)
@@ -76,7 +77,9 @@ trait TopicLoader {
     KafkaConsumer
       .stream(consumerSettings)
       .flatMap { consumer =>
-        load(topics, LoadAll, consumer).onFinalizeCase(onLoad) ++ consumer.records.map(_.record)
+        // Adding a sleep after the load makes it fail consistently
+        load(topics, LoadAll, consumer).onFinalizeCase(onLoad(_) <* Async[F].sleep(5.seconds))
+          ++ consumer.records.debug().map(_.record)
       }
   }
 
@@ -89,7 +92,7 @@ trait TopicLoader {
       logOffsets <- Stream.eval(logOffsetsForTopics(topics, strategy, consumer)).flatMap(Stream.fromOption(_))
       _          <- Stream.eval(assignOffsets(logOffsets, consumer))
       _          <- Stream.eval(info"log offsets: ${logOffsets.show}")
-      record     <- consumer.records.map(_.record).through(filterBelowHighestOffset(logOffsets))
+      record     <- consumer.records.debug().map(_.record).through(filterBelowHighestOffset(logOffsets))
     } yield record
 
   private def assignOffsets[F[_] : Monad : Logger, K, V](

@@ -231,10 +231,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
             _         <- eventually(topicState.get.asserting(_ should contain theSameElementsAs preLoad))
             _         <- eventually(loadState.get.asserting(_ shouldBe true))
             _         <- publishStringMessages(testTopic1, postLoad)
-            assertion <-
-              eventually(
-                topicState.get.asserting(_ should contain theSameElementsAs (preLoad ++ postLoad))
-              )
+            assertion <- eventually(topicState.get.asserting(_ should contain theSameElementsAs (preLoad ++ postLoad)))
           } yield assertion
         }
 
