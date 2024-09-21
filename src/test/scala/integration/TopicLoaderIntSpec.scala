@@ -52,7 +52,6 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
       val strategy = LoadCommitted
 
-      // TODO - failing
       "stream all records up to the committed offset with LoadCommitted strategy" in withKafkaContext { ctx =>
         import ctx.given
 
@@ -68,7 +67,6 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         } yield result should contain theSameElementsAs committed
       }
 
-      // TODO - failing
       "stream available records even when one topic is empty" in withKafkaContext { ctx =>
         import ctx.given
 
@@ -84,7 +82,6 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         } yield result should contain theSameElementsAs committed
       }
 
-      // TODO - failing
       "work when highest offset is missing in log and there are messages after highest offset" in withKafkaContext {
         ctx =>
           import ctx.given
@@ -98,9 +95,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
             _          <- publishStringMessages(testTopic1, published)
             _          <- moveOffsetToEnd(partitions)
             _          <- publishToKafkaAndWaitForCompaction(partitions, toBeUpdated.map(_ -> _.reverse))
-            _          <- consumeEventually(partitions) { foo =>
-                            foo.flatMap(foo => IO.println(s"Got result: $foo")) >> foo.asserting(bar => bar should not be empty)
-                          }
+            _          <- consumeEventually(partitions)(_.asserting(_ should not be empty))
             result     <- runLoader(NonEmptyList.one(testTopic1), strategy)
           } yield result should contain theSameElementsAs notUpdated
       }

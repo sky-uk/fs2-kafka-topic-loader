@@ -189,21 +189,14 @@ trait TopicLoader {
       t: HighestOffsetsWithRecord[K, V],
       r: ConsumerRecord[K, V]
   ): HighestOffsetsWithRecord[K, V] = {
-//    println(s"HighestOffsetWithRecord: $t")
-//    println(s"ConsumerRecord: $r")
     val partitionHighest: Option[Long] = t.partitionOffsets.get(TopicPartition(r.topic, r.partition))
-//    println(s"partition highest: $partitionHighest")
 
     val reachedHighest: Option[TopicPartition] = for {
       offset  <- partitionHighest
       highest <- Option.when(r.offset >= offset)(TopicPartition(r.topic, r.partition))
     } yield highest
 
-//    println(s"reached highest: $reachedHighest")
-
     val emittableRecord = partitionHighest.collect { case h if r.offset <= h => r }
-
-//    println(s"EmittableRecord: $emittableRecord")
 
     reachedHighest match {
       case Some(highest) =>

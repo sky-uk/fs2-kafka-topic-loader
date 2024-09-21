@@ -123,7 +123,6 @@ trait KafkaHelpers[F[_]] {
         endOffsets         <- consumer.endOffsets(partitions.toSortedSet)
         offsetsAndMetadata <- F.pure(endOffsets.view.mapValues(OffsetAndMetadata(_, "")).toMap)
         _                  <- consumer.commitSync(offsetsAndMetadata)
-//        _                  <- consumer.seekToEnd // TODO - Necessary?
       } yield ()
     }
 
