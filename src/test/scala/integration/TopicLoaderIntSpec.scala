@@ -275,7 +275,6 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
       } yield assertion
     }
 
-    // TODO - still failing
     "execute callback if one topic is empty and keep streaming" in withKafkaContext { ctx =>
       import ctx.given
 

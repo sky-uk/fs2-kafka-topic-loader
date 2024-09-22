@@ -12,7 +12,6 @@ import org.apache.kafka.common.TopicPartition
 import org.typelevel.log4cats.syntax.*
 import org.typelevel.log4cats.{Logger, LoggerFactory}
 
-import scala.concurrent.duration.*
 import scala.collection.immutable.SortedMap
 
 object TopicLoader extends TopicLoader {
@@ -74,17 +73,21 @@ trait TopicLoader {
       consumerSettings: ConsumerSettings[F, K, V]
   )(onLoad: Resource.ExitCase => F[Unit]): Stream[F, ConsumerRecord[K, V]] = {
     given Logger[F] = LoggerFactory[F].getLogger
-    KafkaConsumer
-      .stream(consumerSettings)
-      .flatMap { consumer =>
-        for {
-          logOffsets <- Stream.eval(logOffsetsForTopics(topics, LoadAll, consumer)).flatMap(Stream.fromOption(_))
-          _          <- Stream.eval(info"log offsets: ${logOffsets.show}")
-          record     <- load(logOffsets, consumer).onFinalizeCase(onLoad)
-                          ++ Stream.eval(assignOffsets(logOffsets, consumer)(_.highest)).drain
-                          ++ consumer.records.map(_.record)
-        } yield record
-      }
+
+    def postLoad(logOffsets: NonEmptyMap[TopicPartition, LogOffsets]): Stream[F, ConsumerRecord[K, V]] =
+      for {
+        // The only consistent workaround for re-assigning offsets after the initial load is to re-create the consumer
+        postLoadConsumer <- KafkaConsumer.stream(consumerSettings)
+        _                <- Stream.eval(assignOffsets(logOffsets, postLoadConsumer)(_.highest))
+        record           <- postLoadConsumer.records.map(_.record)
+      } yield record
+
+    for {
+      preloadConsumer <- KafkaConsumer.stream(consumerSettings)
+      logOffsets      <- Stream.eval(logOffsetsForTopics(topics, LoadAll, preloadConsumer)).flatMap(Stream.fromOption(_))
+      _               <- Stream.eval(info"log offsets: ${logOffsets.show}")
+      record          <- load(logOffsets, preloadConsumer).onFinalizeCase(onLoad) ++ postLoad(logOffsets)
+    } yield record
   }
 
   private def load[F[_] : Async : Logger, K, V](
@@ -102,27 +105,21 @@ trait TopicLoader {
       logOffsets: NonEmptyMap[TopicPartition, LogOffsets],
       consumer: KafkaConsumer[F, K, V]
   ): Stream[F, ConsumerRecord[K, V]] =
-    Stream.eval(assignOffsets(logOffsets, consumer)(_.lowest)).drain ++
-      consumer.records.map(_.record).through(filterBelowHighestOffset(logOffsets))
+    for {
+      _      <- Stream.eval(assignOffsets(logOffsets, consumer)(_.lowest))
+      record <- consumer.records.map(_.record).through(filterBelowHighestOffset(logOffsets))
+    } yield record
 
-  private def assignOffsets[F[_] : Async : Logger, K, V](
+  private def assignOffsets[F[_] : Monad : Logger, K, V](
       logOffsets: NonEmptyMap[TopicPartition, LogOffsets],
       consumer: KafkaConsumer[F, K, V]
   )(position: LogOffsets => Long): F[Unit] =
     for {
-      _         <- debug"Assigning partitions: ${logOffsets.keys.mkString_(",")}"
-      _         <- consumer.assign(logOffsets.keys)
-      positions <- consumer.assignment.flatMap(_.toList.traverse(tp => consumer.position(tp).tupleLeft(tp)))
-      _         <- debug"Position: ${positions.toMap.show}"
-      _         <- consumer.seekToBeginning
-      _         <- logOffsets.toNel.traverse_ { (tp, o) =>
-                     debug"Seeking to offset ${position(o)} for partition ${tp.show}" >> consumer.seek(tp, position(o))
-                   }
-      positions <- consumer.assignment.flatMap(_.toList.traverse(tp => consumer.position(tp).tupleLeft(tp)))
-      _         <- debug"Position: ${positions.toMap.show}"
-      _         <- Async[F].sleep(5.seconds)
-      positions <- consumer.assignment.flatMap(_.toList.traverse(tp => consumer.position(tp).tupleLeft(tp)))
-      _         <- debug"Position: ${positions.toMap.show}"
+      _ <- debug"Assigning partitions: ${logOffsets.keys.mkString_(",")}"
+      _ <- consumer.assign(logOffsets.keys)
+      _ <- logOffsets.toNel.traverse_ { (tp, o) =>
+             debug"Seeking to offset ${position(o)} for partition ${tp.show}" >> consumer.seek(tp, position(o))
+           }
     } yield ()
 
   private def filterBelowHighestOffset[F[_] : Monad : Logger, K, V](
