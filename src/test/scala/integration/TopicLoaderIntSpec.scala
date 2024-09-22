@@ -275,6 +275,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
       } yield assertion
     }
 
+    // TODO - still failing
     "execute callback if one topic is empty and keep streaming" in withKafkaContext { ctx =>
       import ctx.given
 
@@ -293,10 +294,9 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
             _         <- eventually(topicState.get.asserting(_ should contain theSameElementsAs forTopic1))
             _         <- eventually(loadState.get.asserting(_ shouldBe true))
             _         <- publishStringMessages(testTopic2, forTopic2)
-            assertion <-
-              eventually(
-                topicState.get.asserting(_ should contain theSameElementsAs (forTopic1 ++ forTopic2))
-              )
+            assertion <- eventually(
+                           topicState.get.asserting(_ should contain theSameElementsAs (forTopic1 ++ forTopic2))
+                         )
           } yield assertion
         }
 

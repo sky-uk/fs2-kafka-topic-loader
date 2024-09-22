@@ -79,7 +79,7 @@ trait TopicLoader {
       .flatMap { consumer =>
         // Adding a sleep after the load makes it fail consistently
         load(topics, LoadAll, consumer).onFinalizeCase(onLoad(_) <* Async[F].sleep(5.seconds))
-          ++ consumer.records.debug().map(_.record)
+          ++ consumer.records.debugChunks().map(_.record)
       }
   }
 
@@ -89,21 +89,27 @@ trait TopicLoader {
       consumer: KafkaConsumer[F, K, V]
   ): Stream[F, ConsumerRecord[K, V]] =
     for {
-      logOffsets <- Stream.eval(logOffsetsForTopics(topics, strategy, consumer)).flatMap(Stream.fromOption(_))
-      _          <- Stream.eval(assignOffsets(logOffsets, consumer))
-      _          <- Stream.eval(info"log offsets: ${logOffsets.show}")
-      record     <- consumer.records.debug().map(_.record).through(filterBelowHighestOffset(logOffsets))
+      logOffsets      <- Stream.eval(logOffsetsForTopics(topics, strategy, consumer)).flatMap(Stream.fromOption(_))
+      _               <- Stream.eval(info"log offsets: ${logOffsets.show}")
+      _               <- Stream.eval(assignOffsets(logOffsets, consumer)(_.lowest))
+      reassignHighest <- Stream(
+                           Stream
+                             .eval(assignOffsets(logOffsets, consumer)(lo => Math.max(lo.highest - 1, 0)))
+                             .drain
+                         )
+      record          <-
+        consumer.records.debugChunks().map(_.record).through(filterBelowHighestOffset(logOffsets)) ++ reassignHighest
     } yield record
 
   private def assignOffsets[F[_] : Monad : Logger, K, V](
       logOffsets: NonEmptyMap[TopicPartition, LogOffsets],
       consumer: KafkaConsumer[F, K, V]
-  ): F[Unit] =
+  )(position: LogOffsets => Long): F[Unit] =
     for {
       _ <- debug"Assigning partitions: ${logOffsets.keys.mkString_(",")}"
       _ <- consumer.assign(logOffsets.keys)
       _ <- logOffsets.toNel.traverse_ { (tp, o) =>
-             debug"Seeking to offset ${o.lowest} for partition ${tp.show}" >> consumer.seek(tp, o.lowest)
+             debug"Seeking to offset ${position(o)} for partition ${tp.show}" >> consumer.seek(tp, position(o))
            }
     } yield ()
 
