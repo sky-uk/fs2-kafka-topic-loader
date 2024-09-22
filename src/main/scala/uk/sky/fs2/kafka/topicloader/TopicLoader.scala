@@ -12,8 +12,8 @@ import org.apache.kafka.common.TopicPartition
 import org.typelevel.log4cats.syntax.*
 import org.typelevel.log4cats.{Logger, LoggerFactory}
 
-import scala.collection.immutable.SortedMap
 import scala.concurrent.duration.*
+import scala.collection.immutable.SortedMap
 
 object TopicLoader extends TopicLoader {
   private[topicloader] case class LogOffsets(lowest: Long, highest: Long)
@@ -80,7 +80,7 @@ trait TopicLoader {
         for {
           logOffsets <- Stream.eval(logOffsetsForTopics(topics, LoadAll, consumer)).flatMap(Stream.fromOption(_))
           _          <- Stream.eval(info"log offsets: ${logOffsets.show}")
-          record     <- load(logOffsets, consumer).onFinalizeCase(onLoad(_) <* Async[F].sleep(5.seconds))
+          record     <- load(logOffsets, consumer).onFinalizeCase(onLoad)
                           ++ Stream.eval(assignOffsets(logOffsets, consumer)(_.highest)).drain
                           ++ consumer.records.map(_.record)
         } yield record
@@ -102,21 +102,27 @@ trait TopicLoader {
       logOffsets: NonEmptyMap[TopicPartition, LogOffsets],
       consumer: KafkaConsumer[F, K, V]
   ): Stream[F, ConsumerRecord[K, V]] =
-    for {
-      _      <- Stream.eval(assignOffsets(logOffsets, consumer)(_.lowest))
-      record <- consumer.records.map(_.record).through(filterBelowHighestOffset(logOffsets))
-    } yield record
+    Stream.eval(assignOffsets(logOffsets, consumer)(_.lowest)).drain ++
+      consumer.records.map(_.record).through(filterBelowHighestOffset(logOffsets))
 
-  private def assignOffsets[F[_] : Monad : Logger, K, V](
+  private def assignOffsets[F[_] : Async : Logger, K, V](
       logOffsets: NonEmptyMap[TopicPartition, LogOffsets],
       consumer: KafkaConsumer[F, K, V]
   )(position: LogOffsets => Long): F[Unit] =
     for {
-      _ <- debug"Assigning partitions: ${logOffsets.keys.mkString_(",")}"
-      _ <- consumer.assign(logOffsets.keys)
-      _ <- logOffsets.toNel.traverse_ { (tp, o) =>
-             debug"Seeking to offset ${position(o)} for partition ${tp.show}" >> consumer.seek(tp, position(o))
-           }
+      _         <- debug"Assigning partitions: ${logOffsets.keys.mkString_(",")}"
+      _         <- consumer.assign(logOffsets.keys)
+      positions <- consumer.assignment.flatMap(_.toList.traverse(tp => consumer.position(tp).tupleLeft(tp)))
+      _         <- debug"Position: ${positions.toMap.show}"
+      _         <- consumer.seekToBeginning
+      _         <- logOffsets.toNel.traverse_ { (tp, o) =>
+                     debug"Seeking to offset ${position(o)} for partition ${tp.show}" >> consumer.seek(tp, position(o))
+                   }
+      positions <- consumer.assignment.flatMap(_.toList.traverse(tp => consumer.position(tp).tupleLeft(tp)))
+      _         <- debug"Position: ${positions.toMap.show}"
+      _         <- Async[F].sleep(5.seconds)
+      positions <- consumer.assignment.flatMap(_.toList.traverse(tp => consumer.position(tp).tupleLeft(tp)))
+      _         <- debug"Position: ${positions.toMap.show}"
     } yield ()
 
   private def filterBelowHighestOffset[F[_] : Monad : Logger, K, V](
