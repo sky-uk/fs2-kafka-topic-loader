@@ -80,7 +80,7 @@ trait TopicLoader {
         for {
           logOffsets <- Stream.eval(logOffsetsForTopics(topics, LoadAll, consumer)).flatMap(Stream.fromOption(_))
           _          <- Stream.eval(info"log offsets: ${logOffsets.show}")
-          record     <- load(topics, LoadAll, consumer).onFinalizeCase(onLoad(_) <* Async[F].sleep(5.seconds))
+          record     <- load(logOffsets, consumer).onFinalizeCase(onLoad(_) <* Async[F].sleep(5.seconds))
                           ++ Stream.eval(assignOffsets(logOffsets, consumer)(_.highest)).drain
                           ++ consumer.records.map(_.record)
         } yield record
@@ -95,8 +95,16 @@ trait TopicLoader {
     for {
       logOffsets <- Stream.eval(logOffsetsForTopics(topics, strategy, consumer)).flatMap(Stream.fromOption(_))
       _          <- Stream.eval(info"log offsets: ${logOffsets.show}")
-      _          <- Stream.eval(assignOffsets(logOffsets, consumer)(_.lowest))
-      record     <- consumer.records.map(_.record).through(filterBelowHighestOffset(logOffsets))
+      record     <- load(logOffsets, consumer)
+    } yield record
+
+  private def load[F[_] : Async : Logger, K, V](
+      logOffsets: NonEmptyMap[TopicPartition, LogOffsets],
+      consumer: KafkaConsumer[F, K, V]
+  ): Stream[F, ConsumerRecord[K, V]] =
+    for {
+      _      <- Stream.eval(assignOffsets(logOffsets, consumer)(_.lowest))
+      record <- consumer.records.map(_.record).through(filterBelowHighestOffset(logOffsets))
     } yield record
 
   private def assignOffsets[F[_] : Monad : Logger, K, V](
