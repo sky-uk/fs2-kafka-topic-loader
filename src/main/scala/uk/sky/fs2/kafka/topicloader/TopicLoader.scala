@@ -77,9 +77,14 @@ trait TopicLoader {
     KafkaConsumer
       .stream(consumerSettings)
       .flatMap { consumer =>
-        // Adding a sleep after the load makes it fail consistently
-        load(topics, LoadAll, consumer).onFinalizeCase(onLoad(_) <* Async[F].sleep(5.seconds))
+        val foo = for {
+          logOffsets <- Stream.eval(logOffsetsForTopics(topics, LoadAll, consumer)).flatMap(Stream.fromOption(_))
+          _          <- Stream.eval(info"log offsets: ${logOffsets.show}")
+        } yield load(topics, LoadAll, consumer).onFinalizeCase(onLoad(_) <* Async[F].sleep(5.seconds))
+          ++ Stream.eval(assignOffsets(logOffsets, consumer)(_.highest)).drain
           ++ consumer.records.debugChunks().map(_.record)
+
+        foo.flatten
       }
   }
 
@@ -89,16 +94,10 @@ trait TopicLoader {
       consumer: KafkaConsumer[F, K, V]
   ): Stream[F, ConsumerRecord[K, V]] =
     for {
-      logOffsets      <- Stream.eval(logOffsetsForTopics(topics, strategy, consumer)).flatMap(Stream.fromOption(_))
-      _               <- Stream.eval(info"log offsets: ${logOffsets.show}")
-      _               <- Stream.eval(assignOffsets(logOffsets, consumer)(_.lowest))
-      reassignHighest <- Stream(
-                           Stream
-                             .eval(assignOffsets(logOffsets, consumer)(lo => Math.max(lo.highest - 1, 0)))
-                             .drain
-                         )
-      record          <-
-        consumer.records.debugChunks().map(_.record).through(filterBelowHighestOffset(logOffsets)) ++ reassignHighest
+      logOffsets <- Stream.eval(logOffsetsForTopics(topics, strategy, consumer)).flatMap(Stream.fromOption(_))
+      _          <- Stream.eval(info"log offsets: ${logOffsets.show}")
+      _          <- Stream.eval(assignOffsets(logOffsets, consumer)(_.lowest))
+      record     <- consumer.records.debugChunks().map(_.record).through(filterBelowHighestOffset(logOffsets))
     } yield record
 
   private def assignOffsets[F[_] : Monad : Logger, K, V](
