@@ -2,35 +2,35 @@ package utils
 
 import java.util.UUID
 
-import base.AsyncIntSpec
 import cats.data.{NonEmptyList, NonEmptySet}
-import cats.effect.kernel.Fiber
+import cats.effect.std.Supervisor
 import cats.effect.syntax.all.*
 import cats.effect.{Async, Resource}
 import cats.syntax.all.*
 import fs2.Stream
 import fs2.kafka.{AutoOffsetReset, ConsumerRecord, ConsumerSettings, KafkaConsumer}
-import io.github.embeddedkafka.EmbeddedKafkaConfig
 import org.apache.kafka.clients.consumer.OffsetAndMetadata
 import org.apache.kafka.common.TopicPartition
 import org.scalatest.Assertion
-import org.scalatest.concurrent.AbstractPatienceConfiguration
+import org.scalatest.concurrent.{AbstractPatienceConfiguration, Eventually}
 import org.scalatest.exceptions.TestFailedException
+import org.scalatest.matchers.should.Matchers
 import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.slf4j.Slf4jFactory
 import uk.sky.fs2.kafka.topicloader.{LoadTopicStrategy, TopicLoader}
+import utils.KafkaContainer.KafkaConfig
 
 import scala.concurrent.duration.*
 
 trait KafkaHelpers[F[_]] {
-  self: AsyncIntSpec[F] & EmbeddedKafka[F] & AbstractPatienceConfiguration =>
+  self: EmbeddedKafka[F] & Eventually & Matchers & AbstractPatienceConfiguration =>
 
   val groupId    = "test-consumer-group"
   val testTopic1 = "load-state-topic-1"
   val testTopic2 = "load-state-topic-2"
 
   given consumerSettings(using
-      kafkaConfig: EmbeddedKafkaConfig,
+      kafkaConfig: KafkaConfig,
       F: Async[F]
   ): ConsumerSettings[F, String, String] =
     ConsumerSettings[F, String, String]
@@ -63,9 +63,9 @@ trait KafkaHelpers[F[_]] {
   def publishToKafkaAndTriggerCompaction(
       partitions: NonEmptySet[TopicPartition],
       messages: Seq[(String, String)]
-  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Unit] = {
+  )(using kafkaConfig: KafkaConfig, F: Async[F]): F[Unit] = {
     val topic      = partitions.map(_.topic()).toList.head
-    val fillerSize = 20
+    val fillerSize = 100
     val filler     = List.fill(fillerSize)(UUID.randomUUID().toString).map(x => (x, x))
 
     publishStringMessages(topic, messages) *> publishStringMessages(topic, filler)
@@ -93,14 +93,16 @@ trait KafkaHelpers[F[_]] {
   )(using
       consumerSettings: ConsumerSettings[F, String, String],
       F: Async[F]
-  ): Resource[F, Fiber[F, Throwable, Unit]] = Resource.make {
-    loadAndRunLoader(topics)(onLoad)
-      .map(recordToTuple)
-      .evalTap(onRecord)
-      .compile
-      .drain
-      .start
-  }(_.cancel.void)
+  ): Resource[F, Unit] =
+    Supervisor[F]
+      .evalMap(_.supervise {
+        loadAndRunLoader(topics)(onLoad)
+          .map(recordToTuple)
+          .evalTap(onRecord)
+          .compile
+          .drain
+      })
+      .void
 
   def loadAndRunLoader(topics: NonEmptyList[String])(onLoad: Resource.ExitCase => F[Unit])(using
       consumerSettings: ConsumerSettings[F, String, String],
@@ -112,12 +114,12 @@ trait KafkaHelpers[F[_]] {
 
   def moveOffsetToEnd(
       partitions: NonEmptySet[TopicPartition]
-  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Unit] =
+  )(using kafkaConfig: KafkaConfig, F: Async[F]): F[Unit] =
     withAssignedConsumer(
       autoCommit = true,
       offsetReset = AutoOffsetReset.Earliest,
       partitions = partitions,
-      groupId = groupId.some
+      groupId = groupId
     ) { consumer =>
       for {
         endOffsets         <- consumer.endOffsets(partitions.toSortedSet)
@@ -129,7 +131,7 @@ trait KafkaHelpers[F[_]] {
   def publishToKafkaAndWaitForCompaction(
       partitions: NonEmptySet[TopicPartition],
       messages: Seq[(String, String)]
-  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Unit] = for {
+  )(using kafkaConfig: KafkaConfig, F: Async[F]): F[Unit] = for {
     _ <- publishToKafkaAndTriggerCompaction(partitions, messages)
     _ <- waitForCompaction(partitions)
   } yield ()
@@ -137,73 +139,50 @@ trait KafkaHelpers[F[_]] {
   def publishToKafkaAndWaitForDeletion(
       partitions: NonEmptySet[TopicPartition],
       messages: Seq[(String, String)]
-  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Unit] = for {
+  )(using kafkaConfig: KafkaConfig, F: Async[F]): F[Unit] = for {
     _ <- publishToKafkaAndTriggerCompaction(partitions, messages)
     _ <- waitForDeletion(partitions)
   } yield ()
 
   def waitForCompaction(
       partitions: NonEmptySet[TopicPartition]
-  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Assertion] =
-    consumeEventually(partitions) { r =>
-      for {
-        records    <- r
-        messageKeys = records.map { case (k, _) => k }
-      } yield {
-        messageKeys should not be empty
-        messageKeys should contain theSameElementsAs messageKeys.toSet
-      }
+  )(using kafkaConfig: KafkaConfig, F: Async[F]): F[Assertion] =
+    consumeEventually(partitions) { records =>
+      val messageKeys = records.map((k, _) => k)
+      messageKeys should not be empty
+      messageKeys should contain theSameElementsAs messageKeys.toSet
+
     }
 
   def waitForDeletion(
       partitions: NonEmptySet[TopicPartition]
-  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Assertion] =
-    consumeEventually(partitions) { r =>
-      for {
-        records <- r
-      } yield records shouldBe empty
+  )(using kafkaConfig: KafkaConfig, F: Async[F]): F[Assertion] =
+    consumeEventually(partitions) { records =>
+      records shouldBe empty
     }
 
   def consumeEventually(
       partitions: NonEmptySet[TopicPartition],
       groupId: String = UUID.randomUUID().toString
   )(
-      f: F[List[(String, String)]] => F[Assertion]
-  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Assertion] =
+      f: List[(String, String)] => Assertion
+  )(using kafkaConfig: KafkaConfig, F: Async[F]): F[Assertion] =
     eventually {
       val records: F[List[(String, String)]] = withAssignedConsumer(
         autoCommit = false,
         offsetReset = AutoOffsetReset.Earliest,
-        partitions,
-        groupId.some
+        partitions = partitions,
+        groupId = groupId
       )(_.records.map(_.record).map(recordToTuple).interruptAfter(5.second).compile.toList)
 
-      f(records)
+      records.map(f)
     }
 
   def withAssignedConsumer[T](
       autoCommit: Boolean,
       offsetReset: AutoOffsetReset,
       partitions: NonEmptySet[TopicPartition],
-      groupId: Option[String] = None
-  )(f: KafkaConsumer[F, String, String] => F[T])(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[T] = {
-    val consumer = createConsumer(autoCommit, offsetReset, groupId)
-
-    consumer.use(c => c.assign(partitions) >> f(c))
-  }
-
-  def createConsumer(
-      autoCommit: Boolean,
-      offsetReset: AutoOffsetReset,
-      groupId: Option[String]
-  )(implicit kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): Resource[F, KafkaConsumer[F, String, String]] = {
-    val baseSettings =
-      ConsumerSettings[F, String, String]
-        .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
-        .withEnableAutoCommit(autoCommit)
-        .withAutoOffsetReset(offsetReset)
-
-    val settings = groupId.fold(baseSettings)(baseSettings.withGroupId)
-    KafkaConsumer[F].resource(settings)
-  }
+      groupId: String = UUID.randomUUID().toString
+  )(f: KafkaConsumer[F, String, String] => F[T])(using kafkaConfig: KafkaConfig, F: Async[F]): F[T] =
+    withConsumer(autoCommit, offsetReset, groupId)(consumer => consumer.assign(partitions) >> f(consumer))
 }
