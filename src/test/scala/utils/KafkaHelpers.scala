@@ -2,7 +2,6 @@ package utils
 
 import java.util.UUID
 
-import base.AsyncIntSpec
 import cats.data.{NonEmptyList, NonEmptySet}
 import cats.effect.std.Supervisor
 import cats.effect.syntax.all.*
@@ -15,6 +14,7 @@ import org.apache.kafka.common.TopicPartition
 import org.scalatest.Assertion
 import org.scalatest.concurrent.{AbstractPatienceConfiguration, Eventually}
 import org.scalatest.exceptions.TestFailedException
+import org.scalatest.matchers.should.Matchers
 import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.slf4j.Slf4jFactory
 import uk.sky.fs2.kafka.topicloader.{LoadTopicStrategy, TopicLoader}
@@ -23,7 +23,7 @@ import utils.KafkaContainer.KafkaConfig
 import scala.concurrent.duration.*
 
 trait KafkaHelpers[F[_]] {
-  self: AsyncIntSpec[F] & EmbeddedKafka[F] & AbstractPatienceConfiguration =>
+  self: EmbeddedKafka[F] & Eventually & Matchers & AbstractPatienceConfiguration =>
 
   val groupId    = "test-consumer-group"
   val testTopic1 = "load-state-topic-1"
