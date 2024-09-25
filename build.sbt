@@ -1,5 +1,4 @@
 import Dependencies.*
-import org.typelevel.scalacoptions.ScalacOptions
 
 lazy val scala3                 = "3.3.4"
 lazy val supportedScalaVersions = List(scala3)
@@ -31,13 +30,13 @@ lazy val root = (project in file("."))
       Cats.core,
       Cats.effect,
       Cats.log4cats,
-      Cats.log4catsSlf4j,
+      Cats.log4catsSlf4j  % Test,
       Fs2.core,
       Fs2.kafka,
-      embeddedKafka,
-      scalaTest,
-      catsEffectTesting,
-      logbackClassic
+      catsEffectTesting   % Test,
+      logbackClassic      % Test,
+      scalaTest           % Test,
+      testContainersKafka % Test
     )
   )
 
