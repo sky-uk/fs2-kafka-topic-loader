@@ -11,4 +11,9 @@
 
     <logger name="org.apache.kafka.common.metrics" level="OFF" additivity="false"/>
 
+    <!--    Useful for just printing our debug logs. set to DEBUG instead of OFF -->
+    <logger name="uk.sky" level="OFF" additivity="false">
+        <appender-ref ref="STDOUT"/>
+    </logger>
+
 </configuration>

@@ -11,6 +11,7 @@ import cats.syntax.all.*
 import fs2.Stream
 import fs2.kafka.{AutoOffsetReset, ConsumerRecord, ConsumerSettings, KafkaConsumer}
 import io.github.embeddedkafka.EmbeddedKafkaConfig
+import org.apache.kafka.clients.consumer.OffsetAndMetadata
 import org.apache.kafka.common.TopicPartition
 import org.scalatest.Assertion
 import org.scalatest.concurrent.AbstractPatienceConfiguration
@@ -111,20 +112,19 @@ trait KafkaHelpers[F[_]] {
 
   def moveOffsetToEnd(
       partitions: NonEmptySet[TopicPartition]
-  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): Stream[F, KafkaConsumer[F, String, String]] =
+  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Unit] =
     withAssignedConsumer(
       autoCommit = true,
-      offsetReset = AutoOffsetReset.Latest,
+      offsetReset = AutoOffsetReset.Earliest,
       partitions = partitions,
       groupId = groupId.some
-    )(
-      _.evalMap(consumer =>
-        for {
-          _ <- consumer.seekToEnd
-          _ <- partitions.toList.traverse(consumer.position)
-        } yield consumer
-      )
-    )
+    ) { consumer =>
+      for {
+        endOffsets         <- consumer.endOffsets(partitions.toSortedSet)
+        offsetsAndMetadata <- F.pure(endOffsets.view.mapValues(OffsetAndMetadata(_, "")).toMap)
+        _                  <- consumer.commitSync(offsetsAndMetadata)
+      } yield ()
+    }
 
   def publishToKafkaAndWaitForCompaction(
       partitions: NonEmptySet[TopicPartition],
@@ -171,14 +171,14 @@ trait KafkaHelpers[F[_]] {
       f: F[List[(String, String)]] => F[Assertion]
   )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[Assertion] =
     eventually {
-      val records = withAssignedConsumer[F[List[ConsumerRecord[String, String]]]](
+      val records: F[List[(String, String)]] = withAssignedConsumer(
         autoCommit = false,
         offsetReset = AutoOffsetReset.Earliest,
         partitions,
         groupId.some
-      )(_.records.map(_.record).interruptAfter(5.second).compile.toList)
+      )(_.records.map(_.record).map(recordToTuple).interruptAfter(5.second).compile.toList)
 
-      f(records.map(_.map(r => r.key -> r.value)))
+      f(records)
     }
 
   def withAssignedConsumer[T](
@@ -186,19 +186,10 @@ trait KafkaHelpers[F[_]] {
       offsetReset: AutoOffsetReset,
       partitions: NonEmptySet[TopicPartition],
       groupId: Option[String] = None
-  )(f: Stream[F, KafkaConsumer[F, String, String]] => T)(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): T = {
+  )(f: KafkaConsumer[F, String, String] => F[T])(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[T] = {
     val consumer = createConsumer(autoCommit, offsetReset, groupId)
 
-    val stream = Stream
-      .resource(consumer)
-      .evalMap(c =>
-        for {
-          _ <- c.assign(partitions)
-          _ <- c.seekToBeginning
-        } yield c
-      )
-
-    f(stream)
+    consumer.use(c => c.assign(partitions) >> f(c))
   }
 
   def createConsumer(

@@ -61,7 +61,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         for {
           partitions <- createCustomTopics(topics)
           _          <- publishStringMessages(testTopic1, committed)
-          _          <- moveOffsetToEnd(partitions).compile.drain
+          _          <- moveOffsetToEnd(partitions)
           _          <- publishStringMessages(testTopic1, notCommitted)
           result     <- runLoader(topics, strategy)
         } yield result should contain theSameElementsAs committed
@@ -76,7 +76,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
         for {
           partitions <- createCustomTopics(topics)
           _          <- publishStringMessages(testTopic1, committed)
-          _          <- moveOffsetToEnd(partitions).compile.drain
+          _          <- moveOffsetToEnd(partitions)
           _          <- publishStringMessages(testTopic1, notCommitted)
           result     <- runLoader(topics, strategy)
         } yield result should contain theSameElementsAs committed
@@ -93,8 +93,9 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
             partitions <-
               createCustomTopics(NonEmptyList.one(testTopic1), partitions = 1, topicConfig = aggressiveCompactionConfig)
             _          <- publishStringMessages(testTopic1, published)
-            _          <- moveOffsetToEnd(partitions).compile.drain
-            _          <- publishToKafkaAndWaitForCompaction(partitions, toBeUpdated.map { case (k, v) => (k, v.reverse) })
+            _          <- moveOffsetToEnd(partitions)
+            _          <- publishToKafkaAndWaitForCompaction(partitions, toBeUpdated.map(_ -> _.reverse))
+            _          <- consumeEventually(partitions)(_.asserting(_ should not be empty))
             result     <- runLoader(NonEmptyList.one(testTopic1), strategy)
           } yield result should contain theSameElementsAs notUpdated
       }
@@ -230,10 +231,7 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
             _         <- eventually(topicState.get.asserting(_ should contain theSameElementsAs preLoad))
             _         <- eventually(loadState.get.asserting(_ shouldBe true))
             _         <- publishStringMessages(testTopic1, postLoad)
-            assertion <-
-              eventually(
-                topicState.get.asserting(_ should contain theSameElementsAs (preLoad ++ postLoad))
-              )
+            assertion <- eventually(topicState.get.asserting(_ should contain theSameElementsAs (preLoad ++ postLoad)))
           } yield assertion
         }
 
@@ -295,10 +293,9 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
             _         <- eventually(topicState.get.asserting(_ should contain theSameElementsAs forTopic1))
             _         <- eventually(loadState.get.asserting(_ shouldBe true))
             _         <- publishStringMessages(testTopic2, forTopic2)
-            assertion <-
-              eventually(
-                topicState.get.asserting(_ should contain theSameElementsAs (forTopic1 ++ forTopic2))
-              )
+            assertion <- eventually(
+                           topicState.get.asserting(_ should contain theSameElementsAs (forTopic1 ++ forTopic2))
+                         )
           } yield assertion
         }
 
