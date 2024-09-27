@@ -175,7 +175,7 @@ trait KafkaHelpers[F[_]] {
         groupId = groupId
       )(_.records.map(_.record).map(recordToTuple).interruptAfter(5.second).compile.toList)
 
-      records.flatTap(_ => F.delay(println("Attempted"))).map(f)
+      records.map(f)
     }
 
   def withAssignedConsumer[T](
