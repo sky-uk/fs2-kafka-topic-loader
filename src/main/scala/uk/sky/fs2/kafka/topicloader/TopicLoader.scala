@@ -9,8 +9,8 @@ import fs2.kafka.{ConsumerRecord, ConsumerSettings, KafkaConsumer}
 import fs2.{Pipe, Stream}
 import org.apache.kafka.clients.consumer.OffsetAndMetadata
 import org.apache.kafka.common.TopicPartition
+import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.syntax.*
-import org.typelevel.log4cats.{Logger, LoggerFactory}
 
 import scala.collection.immutable.SortedMap
 
@@ -47,12 +47,12 @@ trait TopicLoader {
     * @param consumerSettings
     *   [[fs2.kafka.ConsumerSettings]] for the given topics
     */
-  def load[F[_] : Async : LoggerFactory, K, V](
+  def load[F[_] : Async : Loggable, K, V](
       topics: NonEmptyList[String],
       strategy: LoadTopicStrategy,
       consumerSettings: ConsumerSettings[F, K, V]
   ): Stream[F, ConsumerRecord[K, V]] = {
-    given Logger[F] = LoggerFactory[F].getLogger
+    given Logger[F] = Loggable[F].getLogger
     KafkaConsumer
       .stream(consumerSettings)
       .flatMap(load(topics, strategy, _))
@@ -68,11 +68,11 @@ trait TopicLoader {
     * @param onLoad
     *   A callback that will be evaluated on once the current offsets are reached
     */
-  def loadAndRun[F[_] : Async : LoggerFactory, K, V](
+  def loadAndRun[F[_] : Async : Loggable, K, V](
       topics: NonEmptyList[String],
       consumerSettings: ConsumerSettings[F, K, V]
   )(onLoad: Resource.ExitCase => F[Unit]): Stream[F, ConsumerRecord[K, V]] = {
-    given Logger[F] = LoggerFactory[F].getLogger
+    given Logger[F] = Loggable[F].getLogger
 
     def postLoad(logOffsets: NonEmptyMap[TopicPartition, LogOffsets]): Stream[F, ConsumerRecord[K, V]] =
       for {
