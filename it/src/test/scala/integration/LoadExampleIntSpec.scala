@@ -16,7 +16,7 @@ import scala.concurrent.duration.*
 final class LoadExampleIntSpec extends KafkaSpecBase[IO], KafkaTestContainer[IO] {
 
   "LoadExample" should {
-    "load previously seen messages into the store" in withKafkaContext { implicit kafkaConfig =>
+    "load previously seen messages into the store" in withRunningKafka { implicit kafkaConfig =>
       testContext { ctx =>
         import ctx.*
 
@@ -29,7 +29,7 @@ final class LoadExampleIntSpec extends KafkaSpecBase[IO], KafkaTestContainer[IO]
       }
     }
 
-    "not publish previously committed messages" in withKafkaContext { implicit kafkaConfig =>
+    "not publish previously committed messages" in withRunningKafka { implicit kafkaConfig =>
       testContext { ctx =>
         import ctx.*
 

@@ -9,7 +9,7 @@ import org.testcontainers.utility.DockerImageName
 import utils.KafkaContainer.KafkaConfig
 
 trait KafkaTestContainer[F[_]] {
-  def withKafkaContext(test: KafkaConfig => F[Assertion])(using Sync[F]): F[Assertion] =
+  def withRunningKafka(test: KafkaConfig => F[Assertion])(using Sync[F]): F[Assertion] =
     KafkaContainer[F].use(running => test(running.config))
 }
 
