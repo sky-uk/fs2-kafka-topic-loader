@@ -11,7 +11,7 @@ import fs2.kafka.instances.*
 import org.apache.kafka.clients.admin.NewTopic
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
-import utils.KafkaContainer.KafkaConfig
+import utils.KafkaServer.KafkaConfig
 
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*

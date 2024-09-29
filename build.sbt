@@ -27,16 +27,16 @@ lazy val root = (project in file("."))
     crossScalaVersions := supportedScalaVersions,
     CommonSettings.default,
     libraryDependencies ++= Seq(
+      apacheKafka        % Test cross CrossVersion.for3Use2_13,
       Cats.core,
       Cats.effect,
       Cats.log4cats,
-      Cats.log4catsSlf4j  % Test,
+      Cats.log4catsSlf4j % Test,
       Fs2.core,
       Fs2.kafka,
-      catsEffectTesting   % Test,
-      logbackClassic      % Test,
-      scalaTest           % Test,
-      testContainersKafka % Test
+      catsEffectTesting  % Test,
+      logbackClassic     % Test,
+      scalaTest          % Test
     )
   )
 
