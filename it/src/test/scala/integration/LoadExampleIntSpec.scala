@@ -8,7 +8,7 @@ import load.LoadExample
 import org.scalatest.Assertion
 import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.slf4j.Slf4jFactory
-import utils.KafkaContainer.KafkaConfig
+import utils.KafkaServer.KafkaConfig
 import utils.KafkaTestContainer
 
 import scala.concurrent.duration.*
