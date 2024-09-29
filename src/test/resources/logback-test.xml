@@ -9,7 +9,7 @@
         <appender-ref ref="STDOUT"/>
     </root>
 
-    <logger name="org.apache.kafka.common.metrics" level="OFF" additivity="false"/>
+    <logger name="org.apache.kafka" level="${LOG_LEVEL:-ERROR}" additivity="false"/>
 
     <!--    Useful for just printing our debug logs. set to DEBUG instead of OFF -->
     <logger name="uk.sky" level="OFF" additivity="false">
