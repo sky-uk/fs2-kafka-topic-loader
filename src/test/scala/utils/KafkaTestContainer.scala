@@ -1,5 +1,6 @@
 package utils
 
+import cats.effect.std.Env
 import cats.effect.syntax.all.*
 import cats.effect.{Ref, Resource, Sync}
 import cats.syntax.all.*
@@ -9,7 +10,7 @@ import org.testcontainers.utility.DockerImageName
 import utils.KafkaContainer.KafkaConfig
 
 trait KafkaTestContainer[F[_]] {
-  def withRunningKafka(test: KafkaConfig => F[Assertion])(using Sync[F]): F[Assertion] =
+  def withRunningKafka(test: KafkaConfig => F[Assertion])(using Sync[F], Env[F]): F[Assertion] =
     KafkaContainer[F].use(running => test(running.config))
 }
 
@@ -19,11 +20,16 @@ object KafkaContainer {
     def stop: F[Unit]
   }
 
-  def apply[F[_]](using F: Sync[F]): Resource[F, Running[F]] =
+  def apply[F[_] : Env](using F: Sync[F]): Resource[F, Running[F]] =
     Resource.make {
       for {
         status           <- Ref.of(Status.Starting)
-        container        <- Either.catchNonFatal(Underlying(DockerImageName.parse("confluentinc/cp-kafka:7.4.0"))).liftTo[F]
+        env              <- Env[F].get("CONFLUENT_KAFKA_VERSION")
+        container        <- Either
+                              .catchNonFatal(
+                                Underlying(DockerImageName.parse(s"confluentinc/cp-kafka:${env.getOrElse("7.4.0")}"))
+                              )
+                              .liftTo[F]
         _                <- F.blocking(container.start())
         _                <- status.set(Status.Started)
         bootstrapServers <- F.blocking(container.getBootstrapServers)
