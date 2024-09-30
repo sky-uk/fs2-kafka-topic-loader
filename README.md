@@ -59,7 +59,7 @@ See [`LoadExample.scala`](./it/src/main/scala/load/LoadExample.scala) for a more
 
 ```scala
 import cats.data.NonEmptyList
-import cats.effect.kernel.Resource.ExitCase
+import cats.effect.Resource.ExitCase
 import cats.effect.{IO, IOApp, Ref}
 import fs2.kafka.ConsumerSettings
 import org.typelevel.log4cats.LoggerFactory

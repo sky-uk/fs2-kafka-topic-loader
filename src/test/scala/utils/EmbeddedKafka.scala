@@ -1,62 +1,105 @@
 package utils
 
+import java.util.UUID
+
 import cats.data.{NonEmptyList, NonEmptySet}
-import cats.effect.{Async, Resource, Sync}
+import cats.effect.Async
+import cats.effect.syntax.all.*
 import cats.syntax.all.*
+import fs2.kafka.*
 import fs2.kafka.instances.*
-import io.github.embeddedkafka.Codecs.stringSerializer
-import io.github.embeddedkafka.{EmbeddedKafka as Underlying, EmbeddedKafkaConfig}
-import kafka.server.KafkaServer
+import org.apache.kafka.clients.admin.NewTopic
 import org.apache.kafka.common.TopicPartition
+import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
+import utils.KafkaContainer.KafkaConfig
+
+import scala.concurrent.duration.*
+import scala.jdk.CollectionConverters.*
 
 trait EmbeddedKafka[F[_]] {
 
-  def embeddedKafkaConfigF(implicit F: Sync[F]): F[EmbeddedKafkaConfig] = for {
-    kafkaPort     <- RandomPort[F]
-    zooKeeperPort <- RandomPort[F]
-  } yield EmbeddedKafkaConfig(kafkaPort, zooKeeperPort, customBrokerProperties = Map("log.roll.ms" -> "10"))
-
-  def embeddedKafkaR(kafkaConfig: EmbeddedKafkaConfig)(using F: Async[F]): Resource[F, KafkaServer] =
-    Resource.make(F.blocking(Underlying.start()(kafkaConfig).broker))(server => F.blocking(server.shutdown()).void)
+  private val groupId = UUID.randomUUID().toString
 
   def createCustomTopic(topic: String, partitions: Int, topicConfig: Map[String, String])(using
-      kafkaConfig: EmbeddedKafkaConfig,
+      kafkaConfig: KafkaConfig,
       F: Async[F]
   ): F[NonEmptyList[TopicPartition]] =
     for {
-      tpIndexes   <- F.fromOption(
-                       NonEmptyList.fromList((0 until partitions).toList),
-                       IllegalStateException(s"Partitions cannot be < 1 - got $partitions")
-                     )
-      maybeCreate <- F.blocking {
-                       Underlying.createCustomTopic(topic = topic, topicConfig = topicConfig, partitions = partitions)
-                     }
-      _           <- F.fromTry(maybeCreate)
-    } yield tpIndexes.map(TopicPartition(topic, _))
+      newTopic   <- F.delay {
+                      val newTopic = NewTopic(topic, partitions, 1: Short)
+                      newTopic.configs(topicConfig.asJava)
+                      newTopic
+                    }
+      _          <- withAdminClient(_.createTopic(newTopic))
+      partitions <- NonEmptyList
+                      .fromList((0 until newTopic.numPartitions()).toList)
+                      .liftTo[F](IllegalStateException(s"Partitions cannot be < 1 - got $partitions"))
+    } yield partitions.map(TopicPartition(newTopic.name(), _))
 
   def createCustomTopics(
       topics: NonEmptyList[String],
       partitions: Int = 2,
       topicConfig: Map[String, String] = Map.empty
-  )(using kafkaConfig: EmbeddedKafkaConfig, F: Async[F]): F[NonEmptySet[TopicPartition]] =
+  )(using kafkaConfig: KafkaConfig, F: Async[F]): F[NonEmptySet[TopicPartition]] =
     topics.flatTraverse(createCustomTopic(_, partitions, topicConfig)).map(_.toNes)
 
   def publishStringMessage(topic: String, key: String, message: String)(using
-      kafkaConfig: EmbeddedKafkaConfig,
+      kafkaConfig: KafkaConfig,
       F: Async[F]
-  ): F[Unit] =
-    F.blocking(Underlying.publishToKafka(topic, key, message))
+  ): F[Unit] = publishStringMessages(topic, Seq(key -> message))
 
   def publishStringMessages(topic: String, messages: Seq[(String, String)])(using
-      kafkaConfig: EmbeddedKafkaConfig,
+      kafkaConfig: KafkaConfig,
       F: Async[F]
-  ): F[Unit] =
-    messages.traverse(publishStringMessage(topic, _, _)).void
+  ): F[Unit] = {
+    val records = messages.map((k, v) => ProducerRecord(topic, k, v))
+    withProducer(_.produce(ProducerRecords(records)).flatten).void
+  }
 
   def consumeStringMessage(topic: String, autoCommit: Boolean)(using
-      kafkaConfig: EmbeddedKafkaConfig,
+      kafkaConfig: KafkaConfig,
       F: Async[F]
   ): F[String] =
-    F.blocking(Underlying.consumeFirstStringMessageFrom(topic, autoCommit = autoCommit))
+    withConsumer(autoCommit) { consumer =>
+      for {
+        _       <- consumer.subscribeTo(topic)
+        message <- consumer.records
+                     .take(1)
+                     .compile
+                     .onlyOrError
+                     .timeoutTo(
+                       30.seconds,
+                       KafkaTimeoutException("Could not consume 1 message within 30 seconds").raiseError
+                     )
+      } yield message.record.value
+    }
 
+  def withConsumer[T](
+      autoCommit: Boolean,
+      autoOffsetReset: AutoOffsetReset = AutoOffsetReset.Earliest,
+      groupId: String = groupId
+  )(f: KafkaConsumer[F, String, String] => F[T])(using kafkaConfig: KafkaConfig, F: Async[F]): F[T] = {
+    val consumerSettings = ConsumerSettings[F, String, String]
+      .withBootstrapServers(kafkaConfig.bootstrapServer)
+      .withEnableAutoCommit(autoCommit)
+      .withAutoOffsetReset(autoOffsetReset)
+      .withGroupId(groupId)
+
+    KafkaConsumer.resource(consumerSettings).use(f)
+  }
+
+  def withProducer[T](
+      f: KafkaProducer.PartitionsFor[F, String, String] => F[T]
+  )(using kafkaConfig: KafkaConfig, F: Async[F]): F[T] = {
+    val producerSettings = ProducerSettings[F, String, String]
+      .withBootstrapServers(kafkaConfig.bootstrapServer)
+
+    KafkaProducer.resource(producerSettings).use(f)
+  }
+
+  def withAdminClient[T](f: KafkaAdminClient[F] => F[T])(using kafkaConfig: KafkaConfig, F: Async[F]): F[T] = {
+    val adminClientSettings = AdminClientSettings(kafkaConfig.bootstrapServer)
+
+    KafkaAdminClient.resource(adminClientSettings).use(f)
+  }
 }
