@@ -11,6 +11,8 @@ import fs2.kafka.instances.*
 import org.apache.kafka.clients.admin.NewTopic
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
+import org.typelevel.log4cats.LoggerFactory
+import org.typelevel.log4cats.slf4j.Slf4jFactory
 import utils.KafkaServer.KafkaConfig
 
 import scala.concurrent.duration.*
@@ -19,6 +21,13 @@ import scala.jdk.CollectionConverters.*
 trait EmbeddedKafka[F[_]] {
 
   private val groupId = UUID.randomUUID().toString
+
+  def withRunningKafka[T](test: KafkaConfig => F[T])(using Async[F]): F[T] = {
+    given LoggerFactory[F] = Slf4jFactory.create[F]
+    KafkaConfig
+      .random[F]
+      .flatMap(kafkaConfig => KafkaServer.resource[F](kafkaConfig).surround(test(kafkaConfig)))
+  }
 
   def createCustomTopic(topic: String, partitions: Int, topicConfig: Map[String, String])(using
       kafkaConfig: KafkaConfig,
@@ -80,7 +89,7 @@ trait EmbeddedKafka[F[_]] {
       groupId: String = groupId
   )(f: KafkaConsumer[F, String, String] => F[T])(using kafkaConfig: KafkaConfig, F: Async[F]): F[T] = {
     val consumerSettings = ConsumerSettings[F, String, String]
-      .withBootstrapServers(kafkaConfig.bootstrapServer)
+      .withBootstrapServers(kafkaConfig.plaintextListener)
       .withEnableAutoCommit(autoCommit)
       .withAutoOffsetReset(autoOffsetReset)
       .withGroupId(groupId)
@@ -92,13 +101,13 @@ trait EmbeddedKafka[F[_]] {
       f: KafkaProducer.PartitionsFor[F, String, String] => F[T]
   )(using kafkaConfig: KafkaConfig, F: Async[F]): F[T] = {
     val producerSettings = ProducerSettings[F, String, String]
-      .withBootstrapServers(kafkaConfig.bootstrapServer)
+      .withBootstrapServers(kafkaConfig.plaintextListener)
 
     KafkaProducer.resource(producerSettings).use(f)
   }
 
   def withAdminClient[T](f: KafkaAdminClient[F] => F[T])(using kafkaConfig: KafkaConfig, F: Async[F]): F[T] = {
-    val adminClientSettings = AdminClientSettings(kafkaConfig.bootstrapServer)
+    val adminClientSettings = AdminClientSettings(kafkaConfig.plaintextListener)
 
     KafkaAdminClient.resource(adminClientSettings).use(f)
   }
