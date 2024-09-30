@@ -45,7 +45,7 @@ final class LoadExampleIntSpec extends KafkaSpecBase[IO], KafkaTestContainer[IO]
     }
   }
 
-  final case class TestContext()(using kafkaConfig: KafkaConfig) {
+  final case class TestContext()(using KafkaConfig) {
 
     private val store: IO[Ref[IO, List[String]]] = Ref.empty
 
