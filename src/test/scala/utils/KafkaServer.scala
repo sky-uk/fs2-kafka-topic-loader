@@ -49,13 +49,6 @@ object KafkaServer {
       _               <- state.set(State.Started)
     } yield new KafkaServer[F] {
       override def stop: F[Unit] = {
-        val deleteLogDir =
-          debug"Deleting log directory ${logDir.toAbsolutePath.toString}" >>
-            delete(logDir.toFile).attempt.flatMap {
-              case Right(_)    => debug"Deleted log directory successfully"
-              case Left(error) => Logger[F].error(error)(s"Could not delete log directory: $error")
-            }
-
         val shutdown = for {
           _ <- debug"Starting shutdown"
           _ <- F.blocking(server.shutdown)
@@ -64,15 +57,20 @@ object KafkaServer {
                  .timeoutTo(30.seconds, TimeoutException("Could not shutdown within 30 seconds").raiseError)
         } yield ()
 
-        for {
-          currentState <- state.getAndSet(State.Stopping)
-          _            <- currentState match {
-                            case State.Started | State.Stopping => F.unit
-                            case State.Starting                 => warn"Server cannot be shutdown while starting"
-                            case State.Stopped                  => IllegalStateException("Server is already stopped").raiseError
-                          }
-          _            <- shutdown.guarantee(state.set(State.Stopped) >> deleteLogDir)
-        } yield ()
+        val setState = state.getAndSet(State.Stopping).flatMap {
+          case State.Started | State.Stopping => F.unit
+          case State.Starting                 => warn"Server cannot be shutdown while starting"
+          case State.Stopped                  => IllegalStateException("Server is already stopped").raiseError
+        }
+
+        val deleteLogDir =
+          debug"Deleting log directory ${logDir.toAbsolutePath.toString}" >>
+            delete(logDir.toFile).attempt.flatMap {
+              case Right(_)    => debug"Deleted log directory successfully"
+              case Left(error) => Logger[F].error(error)(s"Could not delete log directory: $error")
+            }
+
+        shutdown.guarantee(setState).guarantee(deleteLogDir)
       }
     }
 
