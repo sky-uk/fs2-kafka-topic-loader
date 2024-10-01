@@ -13,7 +13,6 @@ import kafka.tools.StorageTool
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.common.Uuid
 import org.apache.kafka.common.errors.TimeoutException
-import org.apache.kafka.common.security.auth.SecurityProtocol
 import org.apache.kafka.common.utils.Time
 import org.apache.kafka.coordinator.group.GroupCoordinatorConfig
 import org.apache.kafka.coordinator.transaction.TransactionLogConfigs
@@ -28,36 +27,12 @@ import org.typelevel.log4cats.{Logger, LoggerFactory}
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
+sealed trait KafkaServer[F[_]] {
+  def stop: F[Unit]
+}
+
 object KafkaServer {
-  sealed trait Running[F[_]] {
-    def stop: F[Unit]
-  }
-
-  final case class KafkaConfig(
-      protocol: SecurityProtocol,
-      host: String,
-      kafkaPort: Int,
-      controllerPort: Int
-  ) {
-    val plaintextListener = s"$protocol://$host:$kafkaPort"
-  }
-
-  object KafkaConfig {
-    def random[F[_] : Sync]: F[KafkaConfig] =
-      for {
-        kafkaPort      <- RandomPort[F]
-        controllerPort <- RandomPort[F]
-      } yield KafkaConfig(
-        protocol = SecurityProtocol.PLAINTEXT,
-        host = "localhost",
-        kafkaPort = kafkaPort,
-        controllerPort = controllerPort
-      )
-
-    given Show[KafkaConfig] = Show.fromToString
-  }
-
-  def start[F[_] : LoggerFactory](kafkaConfig: KafkaConfig)(using F: Async[F]): F[KafkaServer.Running[F]] =
+  def start[F[_] : LoggerFactory](kafkaConfig: KafkaConfig)(using F: Async[F]): F[KafkaServer[F]] =
     for {
       given Logger[F] <- LoggerFactory[F].create
       _               <- debug"Created config ${kafkaConfig.show}"
@@ -72,7 +47,7 @@ object KafkaServer {
       _               <- F.blocking(server.startup())
       _               <- debug"Server started"
       _               <- state.set(State.Started)
-    } yield new KafkaServer.Running[F] {
+    } yield new KafkaServer[F] {
       override def stop: F[Unit] = {
         val deleteLogDir =
           debug"Deleting log directory ${logDir.toAbsolutePath.toString}" >>
@@ -96,12 +71,12 @@ object KafkaServer {
                             case State.Starting                 => warn"Server cannot be shutdown while starting"
                             case State.Stopped                  => IllegalStateException("Server is already stopped").raiseError
                           }
-          _            <- shutdown.guarantee(deleteLogDir).guarantee(state.set(State.Stopped))
+          _            <- shutdown.guarantee(state.set(State.Stopped) >> deleteLogDir)
         } yield ()
       }
     }
 
-  def resource[F[_] : LoggerFactory](kafkaConfig: KafkaConfig)(using F: Async[F]): Resource[F, KafkaServer.Running[F]] =
+  def resource[F[_] : LoggerFactory](kafkaConfig: KafkaConfig)(using F: Async[F]): Resource[F, KafkaServer[F]] =
     Resource.make(start[F](kafkaConfig))(_.stop)
 
   private def properties(logDir: Path, kafkaConfig: KafkaConfig): Map[String, String] = {

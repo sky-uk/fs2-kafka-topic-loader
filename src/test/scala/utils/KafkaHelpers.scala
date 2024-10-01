@@ -18,7 +18,6 @@ import org.scalatest.exceptions.TestFailedException
 import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.slf4j.Slf4jFactory
 import uk.sky.fs2.kafka.topicloader.{LoadTopicStrategy, TopicLoader}
-import utils.KafkaServer.KafkaConfig
 
 import scala.concurrent.duration.*
 
