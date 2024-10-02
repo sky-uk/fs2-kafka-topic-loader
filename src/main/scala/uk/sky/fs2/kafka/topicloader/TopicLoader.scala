@@ -55,7 +55,7 @@ trait TopicLoader {
     given Logger[F] = LoggerFactory[F].getLogger
     KafkaConsumer
       .stream(consumerSettings)
-      .flatMap(load(topics, strategy, _))
+      .flatMap(load(topics, strategy, _, "foo"))
   }
 
   /** Stream that loads the specified topics from the beginning. When the latest current offsets are reached, the
@@ -93,13 +93,16 @@ trait TopicLoader {
   private def load[F[_] : Async : Logger, K, V](
       topics: NonEmptyList[String],
       strategy: LoadTopicStrategy,
-      consumer: KafkaConsumer[F, K, V]
-  ): Stream[F, ConsumerRecord[K, V]] =
+      consumer: KafkaConsumer[F, K, V],
+      foo: String
+  ): Stream[F, ConsumerRecord[K, V]] = {
+    println(foo)
     for {
       logOffsets <- Stream.eval(logOffsetsForTopics(topics, strategy, consumer)).flatMap(Stream.fromOption(_))
       _          <- Stream.eval(info"log offsets: ${logOffsets.show}")
       record     <- load(logOffsets, consumer)
     } yield record
+  }
 
   private def load[F[_] : Async : Logger, K, V](
       logOffsets: NonEmptyMap[TopicPartition, LogOffsets],

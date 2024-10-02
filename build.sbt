@@ -20,6 +20,11 @@ ThisBuild / developers   := List(
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
+ThisBuild / versionScheme := Some("early-semver")
+
+ThisBuild / dynverSeparator := "-"
+ThisBuild / tlBaseVersion   := "0.1"
+
 lazy val root = (project in file("."))
   .settings(
     name               := "fs2-kafka-topic-loader",
