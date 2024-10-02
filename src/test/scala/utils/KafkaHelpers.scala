@@ -77,7 +77,7 @@ trait KafkaHelpers[F[_]] {
   )(using consumerSettings: ConsumerSettings[F, String, String], F: Async[F]): F[List[(String, String)]] = {
     given LoggerFactory[F] = Slf4jFactory.create[F]
     TopicLoader
-      .load(topics, strategy, consumerSettings)
+      .load(topics, "foo", strategy, consumerSettings)
       .compile
       .toList
       .map(_.map(recordToTuple))
