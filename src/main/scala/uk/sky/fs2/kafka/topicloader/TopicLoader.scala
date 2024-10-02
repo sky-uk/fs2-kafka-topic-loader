@@ -49,9 +49,11 @@ trait TopicLoader {
     */
   def load[F[_] : Async : LoggerFactory, K, V](
       topics: NonEmptyList[String],
+      foo: String,
       strategy: LoadTopicStrategy,
       consumerSettings: ConsumerSettings[F, K, V]
   ): Stream[F, ConsumerRecord[K, V]] = {
+    println("foo")
     given Logger[F] = LoggerFactory[F].getLogger
     KafkaConsumer
       .stream(consumerSettings)
