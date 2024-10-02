@@ -49,11 +49,9 @@ trait TopicLoader {
     */
   def load[F[_] : Async : LoggerFactory, K, V](
       topics: NonEmptyList[String],
-      foo: String,
       strategy: LoadTopicStrategy,
       consumerSettings: ConsumerSettings[F, K, V]
   ): Stream[F, ConsumerRecord[K, V]] = {
-    println("foo")
     given Logger[F] = LoggerFactory[F].getLogger
     KafkaConsumer
       .stream(consumerSettings)
@@ -72,8 +70,10 @@ trait TopicLoader {
     */
   def loadAndRun[F[_] : Async : LoggerFactory, K, V](
       topics: NonEmptyList[String],
-      consumerSettings: ConsumerSettings[F, K, V]
+      consumerSettings: ConsumerSettings[F, K, V],
+      fooWithDefault: String = ""
   )(onLoad: Resource.ExitCase => F[Unit]): Stream[F, ConsumerRecord[K, V]] = {
+    println(fooWithDefault)
     given Logger[F] = LoggerFactory[F].getLogger
 
     def postLoad(logOffsets: NonEmptyMap[TopicPartition, LogOffsets]): Stream[F, ConsumerRecord[K, V]] =

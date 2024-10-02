@@ -40,7 +40,7 @@ object LoadExample {
       consumerSettings: ConsumerSettings[F, String, String],
       producerSettings: ProducerSettings[F, String, String]
   ): LoadExample[F, Message[F, *], Unit] = {
-    val loadStream = TopicLoader.load[F, String, String](topics, "foo", LoadCommitted, consumerSettings).map(_.value)
+    val loadStream = TopicLoader.load[F, String, String](topics, LoadCommitted, consumerSettings).map(_.value)
 
     val runStream = KafkaConsumer.stream(consumerSettings).subscribe(topics).records
 
