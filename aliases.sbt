@@ -5,4 +5,7 @@ addCommandAlias("runFmt", "scalafmtAll; scalafmtSbt")
 addCommandAlias("checkLint", "checkFmt; checkFix")
 addCommandAlias("runLint", "runFmt; runFix")
 
-addCommandAlias("ciBuild", "project root; checkLint; +test; project it; checkLint; test")
+addCommandAlias(
+  "ciBuild",
+  "project root; checkLint; +test; project it; checkLint; test; project root; mimaReportBinaryIssues"
+)
