@@ -6,9 +6,9 @@ import cats.syntax.all.*
 import org.apache.kafka.common.security.auth.SecurityProtocol
 
 final case class KafkaConfig(
-    protocol: SecurityProtocol,
-    host: String,
-    kafkaPort: Int,
+    private val protocol: SecurityProtocol,
+    private val host: String,
+    private val kafkaPort: Int,
     controllerPort: Int
 ) {
   val plaintextListener = s"$protocol://$host:$kafkaPort"
