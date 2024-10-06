@@ -8,12 +8,11 @@ import load.LoadExample
 import org.scalatest.Assertion
 import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.slf4j.Slf4jFactory
-import utils.KafkaContainer.KafkaConfig
-import utils.KafkaTestContainer
+import utils.KafkaConfig
 
 import scala.concurrent.duration.*
 
-final class LoadExampleIntSpec extends KafkaSpecBase[IO], KafkaTestContainer[IO] {
+final class LoadExampleIntSpec extends KafkaSpecBase[IO] {
 
   "LoadExample" should {
     "load previously seen messages into the store" in withRunningKafka { implicit kafkaConfig =>

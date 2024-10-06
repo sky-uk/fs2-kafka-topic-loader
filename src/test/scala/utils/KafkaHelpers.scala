@@ -18,7 +18,6 @@ import org.scalatest.exceptions.TestFailedException
 import org.typelevel.log4cats.LoggerFactory
 import org.typelevel.log4cats.slf4j.Slf4jFactory
 import uk.sky.fs2.kafka.topicloader.{LoadTopicStrategy, TopicLoader}
-import utils.KafkaContainer.KafkaConfig
 
 import scala.concurrent.duration.*
 
@@ -34,7 +33,7 @@ trait KafkaHelpers[F[_]] {
       F: Async[F]
   ): ConsumerSettings[F, String, String] =
     ConsumerSettings[F, String, String]
-      .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
+      .withBootstrapServers(kafkaConfig.plaintextListener)
       .withAutoOffsetReset(AutoOffsetReset.Earliest)
       .withGroupId(groupId)
 

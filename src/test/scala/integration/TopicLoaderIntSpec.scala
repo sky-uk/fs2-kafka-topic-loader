@@ -7,11 +7,10 @@ import fs2.kafka.{AutoOffsetReset, ConsumerSettings}
 import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
 import org.scalatest.Assertion
 import uk.sky.fs2.kafka.topicloader.{LoadAll, LoadCommitted}
-import utils.KafkaTestContainer
 
 import scala.concurrent.duration.*
 
-class TopicLoaderIntSpec extends KafkaSpecBase[IO], KafkaTestContainer[IO] {
+class TopicLoaderIntSpec extends KafkaSpecBase[IO] {
 
   "load" when {
 

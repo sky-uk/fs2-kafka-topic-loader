@@ -14,9 +14,9 @@ object Dependencies {
     lazy val kafka = "com.github.fd4s" %% "fs2-kafka" % "3.5.1"
   }
 
-  lazy val testContainersKafka = "org.testcontainers" % "kafka"                         % "1.20.1"
-  lazy val scalaTest           = "org.scalatest"     %% "scalatest"                     % "3.2.19"
-  lazy val catsEffectTesting   = "org.typelevel"     %% "cats-effect-testing-scalatest" % "1.5.0"
+  lazy val apacheKafka       = "org.apache.kafka" %% "kafka"                         % "3.8.0"
+  lazy val scalaTest         = "org.scalatest"    %% "scalatest"                     % "3.2.19"
+  lazy val catsEffectTesting = "org.typelevel"    %% "cats-effect-testing-scalatest" % "1.5.0"
 
   lazy val logbackClassic = "ch.qos.logback" % "logback-classic" % "1.5.8"
 }
