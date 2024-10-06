@@ -33,7 +33,7 @@ trait KafkaHelpers[F[_]] {
       F: Async[F]
   ): ConsumerSettings[F, String, String] =
     ConsumerSettings[F, String, String]
-      .withBootstrapServers(s"localhost:${kafkaConfig.kafkaPort}")
+      .withBootstrapServers(kafkaConfig.plaintextListener)
       .withAutoOffsetReset(AutoOffsetReset.Earliest)
       .withGroupId(groupId)
 
