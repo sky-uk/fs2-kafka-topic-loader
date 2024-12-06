@@ -2,55 +2,100 @@ package integration
 
 import base.KafkaSpecBase
 import cats.data.NonEmptyList
-import cats.effect.{IO, Ref}
+import cats.effect.{IO, Ref, Resource}
 import fs2.kafka.{AutoOffsetReset, ConsumerSettings}
 import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
 import org.scalatest.Assertion
-import uk.sky.fs2.kafka.topicloader.{LoadAll, LoadCommitted}
+import uk.sky.fs2.kafka.topicloader.{LoadAll, LoadCommitted, LoadTopicStrategy}
 import utils.KafkaTestContainer
 
 import scala.concurrent.duration.*
 
-class TopicLoaderIntSpec extends KafkaSpecBase[IO], KafkaTestContainer[IO] {
+class TopicLoaderIntSpec extends KafkaSpecBase[IO], KafkaTestContainer[IO], TopicLoaderBehaviours {
 
-  "load" when {
+  "topicLoader.load" should {
+    behave like load(runLoader)
+  }
 
-    "using LoadAll strategy" should {
-
-      val strategy = LoadAll
-      "stream all records from all topics" in withRunningKafka { implicit kafkaConfig =>
-        val topics                 = NonEmptyList.of(testTopic1, testTopic2)
-        val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
-
-        for {
-          _      <- createCustomTopics(topics)
-          _      <- publishStringMessages(testTopic1, forTopic1)
-          _      <- publishStringMessages(testTopic2, forTopic2)
-          result <- runLoader(topics, strategy)
-        } yield result should contain theSameElementsAs (forTopic1 ++ forTopic2)
-      }
-
-      "stream available records even when one topic is empty" in withRunningKafka { implicit kafkaConfig =>
-        val topics    = NonEmptyList.of(testTopic1, testTopic2)
-        val published = records(1 to 15)
-
-        for {
-          _      <- createCustomTopics(topics)
-          _      <- publishStringMessages(testTopic1, published)
-          result <- runLoader(topics, strategy)
-        } yield result should contain theSameElementsAs published
-
-      }
-
+  "topicLoader.loadChunks" should {
+    behave like load { (topics, strategy) =>
+      for {
+        ref    <- Ref.of[IO, List[(String, String)]](List.empty)
+        result <- runLoaderChunks(topics, strategy, cr => ref.update(_ :+ recordToTuple(cr))) >> ref.get
+      } yield result
     }
+  }
 
-    "using LoadCommitted strategy" should {
+  "topicLoader.loadAndRun" should {
+    behave like loadAndRun(loadAndRunR)
+  }
 
-      val strategy = LoadCommitted
+  "topicLoader.loadAndRunChunks" should {
+    behave like loadAndRun(loadAndRunChunksR)
+  }
+}
 
-      "stream all records up to the committed offset with LoadCommitted strategy" in withRunningKafka {
-        implicit kafkaConfig =>
-          val topics                    = NonEmptyList.one(testTopic1)
+trait TopicLoaderBehaviours { this: KafkaSpecBase[IO] & KafkaTestContainer[IO] =>
+
+  type LoaderDefinition =
+    (NonEmptyList[String], LoadTopicStrategy) => ConsumerSettings[IO, String, String] ?=> IO[List[(String, String)]]
+
+  type LoadAndRunDefinition =
+    NonEmptyList[String] => (
+        Resource.ExitCase => IO[Unit],
+        ((String, String)) => IO[Unit]
+    ) => ConsumerSettings[IO, String, String] ?=> Resource[IO, Unit]
+
+  def load(result: LoaderDefinition): Unit =
+    "load" when {
+
+      "using LoadAll strategy" should {
+        val strategy = LoadAll
+
+        "stream all records from all topics" in withRunningKafka { implicit kafkaConfig =>
+          val topics                 = NonEmptyList.of(testTopic1, testTopic2)
+          val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
+
+          for {
+            _      <- createCustomTopics(topics)
+            _      <- publishStringMessages(testTopic1, forTopic1)
+            _      <- publishStringMessages(testTopic2, forTopic2)
+            result <- result(topics, strategy)
+          } yield result should contain theSameElementsAs (forTopic1 ++ forTopic2)
+        }
+
+        "stream available records even when one topic is empty" in withRunningKafka { implicit kafkaConfig =>
+          val topics    = NonEmptyList.of(testTopic1, testTopic2)
+          val published = records(1 to 15)
+
+          for {
+            _      <- createCustomTopics(topics)
+            _      <- publishStringMessages(testTopic1, published)
+            result <- result(topics, strategy)
+          } yield result should contain theSameElementsAs published
+        }
+      }
+
+      "using LoadCommitted strategy" should {
+
+        val strategy = LoadCommitted
+
+        "stream all records up to the committed offset with LoadCommitted strategy" in withRunningKafka {
+          implicit kafkaConfig =>
+            val topics                    = NonEmptyList.one(testTopic1)
+            val (committed, notCommitted) = records(1 to 15).splitAt(10)
+
+            for {
+              partitions <- createCustomTopics(topics)
+              _          <- publishStringMessages(testTopic1, committed)
+              _          <- moveOffsetToEnd(partitions)
+              _          <- publishStringMessages(testTopic1, notCommitted)
+              result     <- result(topics, strategy)
+            } yield result should contain theSameElementsAs committed
+        }
+
+        "stream available records even when one topic is empty" in withRunningKafka { implicit kafkaConfig =>
+          val topics                    = NonEmptyList.of(testTopic1, testTopic2)
           val (committed, notCommitted) = records(1 to 15).splitAt(10)
 
           for {
@@ -58,229 +103,218 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO], KafkaTestContainer[IO] {
             _          <- publishStringMessages(testTopic1, committed)
             _          <- moveOffsetToEnd(partitions)
             _          <- publishStringMessages(testTopic1, notCommitted)
-            result     <- runLoader(topics, strategy)
+            result     <- result(topics, strategy)
           } yield result should contain theSameElementsAs committed
+        }
+
+        "work when highest offset is missing in log and there are messages after highest offset" in withRunningKafka {
+          implicit kafkaConfig =>
+            val published                 = records(1 to 10)
+            val (notUpdated, toBeUpdated) = published.splitAt(5)
+
+            for {
+              partitions <-
+                createCustomTopics(
+                  NonEmptyList.one(testTopic1),
+                  partitions = 1,
+                  topicConfig = aggressiveCompactionConfig
+                )
+              _          <- publishStringMessages(testTopic1, published)
+              _          <- moveOffsetToEnd(partitions)
+              _          <- publishToKafkaAndWaitForCompaction(partitions, toBeUpdated.map((k, v) => (k, v.reverse)))
+              result     <- result(NonEmptyList.one(testTopic1), strategy)
+            } yield result should contain theSameElementsAs notUpdated
+        }
       }
 
-      "stream available records even when one topic is empty" in withRunningKafka { implicit kafkaConfig =>
-        val topics                    = NonEmptyList.of(testTopic1, testTopic2)
-        val (committed, notCommitted) = records(1 to 15).splitAt(10)
+      "using any strategy" when {
+
+        "strategy is LoadAll" should {
+
+          val strategy = LoadAll
+
+          "complete successfully if the topic is empty" in withRunningKafka { implicit kafkaConfig =>
+            val topics = NonEmptyList.one(testTopic1)
+
+            for {
+              _      <- createCustomTopics(topics)
+              result <- runLoader(topics, strategy)
+            } yield result shouldBe empty
+          }
+
+          "read partitions that have been compacted" in withRunningKafka { implicit kafkaConfig =>
+            val published        = records(1 to 10)
+            val topic            = NonEmptyList.one(testTopic1)
+            val publishedUpdated = published.map((k, v) => (k, v.reverse))
+
+            for {
+              partitions <- createCustomTopics(topic, partitions = 1, topicConfig = aggressiveCompactionConfig)
+              _          <- publishToKafkaAndWaitForCompaction(partitions, published ++ publishedUpdated)
+              result     <- runLoader(topic, strategy)
+            } yield result should contain noElementsOf published
+          }
+
+          "read partitions that have been deleted" in withRunningKafka { implicit kafkaConfig =>
+            val published        = records(1 to 10)
+            val topic            = NonEmptyList.one(testTopic1)
+            val publishedUpdated = published.map((k, v) => (k, v.reverse))
+
+            for {
+              partitions <- createCustomTopics(topic, partitions = 1, topicConfig = aggressiveDeletionConfig)
+              _          <- publishToKafkaAndWaitForDeletion(partitions, published ++ publishedUpdated)
+              result     <- runLoader(topic, strategy)
+            } yield result should contain noElementsOf published
+          }
+        }
+
+        "strategy is LoadCommitted" should {
+
+          val strategy = LoadCommitted
+
+          "complete successfully if the topic is empty" in withRunningKafka { implicit kafkaConfig =>
+            val topics = NonEmptyList.one(testTopic1)
+
+            for {
+              _      <- createCustomTopics(topics)
+              result <- result(topics, strategy)
+            } yield result shouldBe empty
+          }
+
+          "read partitions that have been compacted" in withRunningKafka { implicit kafkaConfig =>
+            val published        = records(1 to 10)
+            val topic            = NonEmptyList.one(testTopic1)
+            val publishedUpdated = published.map((k, v) => (k, v.reverse))
+
+            for {
+              partitions <- createCustomTopics(topic, partitions = 1, topicConfig = aggressiveCompactionConfig)
+              _          <- publishToKafkaAndWaitForCompaction(partitions, published ++ publishedUpdated)
+              result     <- result(topic, strategy)
+            } yield result should contain noElementsOf published
+          }
+
+          "read partitions that have been deleted" in withRunningKafka { implicit kafkaConfig =>
+            val published        = records(1 to 10)
+            val topic            = NonEmptyList.one(testTopic1)
+            val publishedUpdated = published.map((k, v) => (k, v.reverse))
+
+            for {
+              partitions <- createCustomTopics(topic, partitions = 1, topicConfig = aggressiveDeletionConfig)
+              _          <- publishToKafkaAndWaitForDeletion(partitions, published ++ publishedUpdated)
+              result     <- result(topic, strategy)
+            } yield result should contain noElementsOf published
+          }
+        }
+      }
+
+      "Kafka is misbehaving" should {
+
+        "fail if unavailable at startup" in withRunningKafka { _ =>
+          given badConsumerSettings: ConsumerSettings[IO, String, String] = ConsumerSettings[IO, String, String]
+            .withBootstrapServers("localhost:6001")
+            .withAutoOffsetReset(AutoOffsetReset.Earliest)
+            .withGroupId("test-consumer-group")
+            .withRequestTimeout(700.millis)
+            .withSessionTimeout(500.millis)
+            .withHeartbeatInterval(300.millis)
+            .withDefaultApiTimeout(1000.millis)
+
+          result(NonEmptyList.one(testTopic1), LoadAll).assertThrows[KafkaTimeoutException]
+        }
+
+      }
+    }
+
+  def loadAndRun(result: LoadAndRunDefinition): Unit =
+    "loadAndRun" should {
+
+      "execute callback when finished loading and keep streaming" in withRunningKafka { implicit kafkaConfig =>
+        val (preLoad, postLoad) = records(1 to 15).splitAt(10)
+
+        def assertPostLoadRecordsConsumed(
+            loadState: Ref[IO, Boolean],
+            topicState: Ref[IO, Seq[(String, String)]]
+        ): IO[Assertion] =
+          result(NonEmptyList.one(testTopic1))(
+            _ => loadState.set(true),
+            r => topicState.getAndUpdate(_ :+ r).void
+          ).surround {
+            for {
+              _         <- eventually(topicState.get.asserting(_ should contain theSameElementsAs preLoad))
+              _         <- eventually(loadState.get.asserting(_ shouldBe true))
+              _         <- publishStringMessages(testTopic1, postLoad)
+              assertion <- eventually(
+                             topicState.get.asserting(_ should contain theSameElementsAs (preLoad ++ postLoad))
+                           )
+            } yield assertion
+          }
 
         for {
-          partitions <- createCustomTopics(topics)
-          _          <- publishStringMessages(testTopic1, committed)
-          _          <- moveOffsetToEnd(partitions)
-          _          <- publishStringMessages(testTopic1, notCommitted)
-          result     <- runLoader(topics, strategy)
-        } yield result should contain theSameElementsAs committed
+          loadState  <- Ref.of[IO, Boolean](false)
+          topicState <- Ref.empty[IO, Seq[(String, String)]]
+          _          <- createCustomTopics(NonEmptyList.one(testTopic1))
+          _          <- publishStringMessages(testTopic1, preLoad)
+          assertion  <- assertPostLoadRecordsConsumed(loadState, topicState)
+        } yield assertion
       }
 
-      "work when highest offset is missing in log and there are messages after highest offset" in withRunningKafka {
-        implicit kafkaConfig =>
-          val published                 = records(1 to 10)
-          val (notUpdated, toBeUpdated) = published.splitAt(5)
+      "execute callback if the topic is empty and keep streaming" in withRunningKafka { implicit kafkaConfig =>
+        val postLoad = records(1 to 15)
 
-          for {
-            partitions <-
-              createCustomTopics(NonEmptyList.one(testTopic1), partitions = 1, topicConfig = aggressiveCompactionConfig)
-            _          <- publishStringMessages(testTopic1, published)
-            _          <- moveOffsetToEnd(partitions)
-            _          <- publishToKafkaAndWaitForCompaction(partitions, toBeUpdated.map((k, v) => (k, v.reverse)))
-            result     <- runLoader(NonEmptyList.one(testTopic1), strategy)
-          } yield result should contain theSameElementsAs notUpdated
-      }
-    }
+        def assertPostLoadRecordsConsumed(
+            loadState: Ref[IO, Boolean],
+            topicState: Ref[IO, Seq[(String, String)]]
+        ): IO[Assertion] =
+          result(NonEmptyList.one(testTopic1))(
+            _ => loadState.set(true),
+            r => topicState.getAndUpdate(_ :+ r).void
+          ).surround {
+            for {
+              _         <- eventually(loadState.get.asserting(_ shouldBe true))
+              _         <- publishStringMessages(testTopic1, postLoad)
+              assertion <- eventually(
+                             topicState.get.asserting(_ should contain theSameElementsAs postLoad)
+                           )
+            } yield assertion
+          }
 
-    "using any strategy" when {
-
-      "strategy is LoadAll" should {
-
-        val strategy = LoadAll
-
-        "complete successfully if the topic is empty" in withRunningKafka { implicit kafkaConfig =>
-          val topics = NonEmptyList.one(testTopic1)
-
-          for {
-            _      <- createCustomTopics(topics)
-            result <- runLoader(topics, strategy)
-          } yield result shouldBe empty
-        }
-
-        "read partitions that have been compacted" in withRunningKafka { implicit kafkaConfig =>
-          val published        = records(1 to 10)
-          val topic            = NonEmptyList.one(testTopic1)
-          val publishedUpdated = published.map((k, v) => (k, v.reverse))
-
-          for {
-            partitions <- createCustomTopics(topic, partitions = 1, topicConfig = aggressiveCompactionConfig)
-            _          <- publishToKafkaAndWaitForCompaction(partitions, published ++ publishedUpdated)
-            result     <- runLoader(topic, strategy)
-          } yield result should contain noElementsOf published
-        }
-
-        "read partitions that have been deleted" in withRunningKafka { implicit kafkaConfig =>
-          val published        = records(1 to 10)
-          val topic            = NonEmptyList.one(testTopic1)
-          val publishedUpdated = published.map((k, v) => (k, v.reverse))
-
-          for {
-            partitions <- createCustomTopics(topic, partitions = 1, topicConfig = aggressiveDeletionConfig)
-            _          <- publishToKafkaAndWaitForDeletion(partitions, published ++ publishedUpdated)
-            result     <- runLoader(topic, strategy)
-          } yield result should contain noElementsOf published
-        }
+        for {
+          loadState  <- Ref.of[IO, Boolean](false)
+          topicState <- Ref.empty[IO, Seq[(String, String)]]
+          _          <- createCustomTopics(NonEmptyList.one(testTopic1))
+          assertion  <- assertPostLoadRecordsConsumed(loadState, topicState)
+        } yield assertion
       }
 
-      "strategy is LoadCommitted" should {
+      "execute callback if one topic is empty and keep streaming" in withRunningKafka { implicit kafkaConfig =>
+        val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
+        val topics                 = NonEmptyList.of(testTopic1, testTopic2)
 
-        val strategy = LoadCommitted
+        def assertPostLoadRecordsConsumed(
+            loadState: Ref[IO, Boolean],
+            topicState: Ref[IO, Seq[(String, String)]]
+        ): IO[Assertion] =
+          result(topics)(
+            _ => loadState.set(true),
+            r => topicState.getAndUpdate(_ :+ r).void
+          ).surround {
+            for {
+              _         <- eventually(topicState.get.asserting(_ should contain theSameElementsAs forTopic1))
+              _         <- eventually(loadState.get.asserting(_ shouldBe true))
+              _         <- publishStringMessages(testTopic2, forTopic2)
+              assertion <- eventually(
+                             topicState.get.asserting(_ should contain theSameElementsAs (forTopic1 ++ forTopic2))
+                           )
+            } yield assertion
+          }
 
-        "complete successfully if the topic is empty" in withRunningKafka { implicit kafkaConfig =>
-          val topics = NonEmptyList.one(testTopic1)
-
-          for {
-            _      <- createCustomTopics(topics)
-            result <- runLoader(topics, strategy)
-          } yield result shouldBe empty
-        }
-
-        "read partitions that have been compacted" in withRunningKafka { implicit kafkaConfig =>
-          val published        = records(1 to 10)
-          val topic            = NonEmptyList.one(testTopic1)
-          val publishedUpdated = published.map((k, v) => (k, v.reverse))
-
-          for {
-            partitions <- createCustomTopics(topic, partitions = 1, topicConfig = aggressiveCompactionConfig)
-            _          <- publishToKafkaAndWaitForCompaction(partitions, published ++ publishedUpdated)
-            result     <- runLoader(topic, strategy)
-          } yield result should contain noElementsOf published
-        }
-
-        "read partitions that have been deleted" in withRunningKafka { implicit kafkaConfig =>
-          val published        = records(1 to 10)
-          val topic            = NonEmptyList.one(testTopic1)
-          val publishedUpdated = published.map((k, v) => (k, v.reverse))
-
-          for {
-            partitions <- createCustomTopics(topic, partitions = 1, topicConfig = aggressiveDeletionConfig)
-            _          <- publishToKafkaAndWaitForDeletion(partitions, published ++ publishedUpdated)
-            result     <- runLoader(topic, strategy)
-          } yield result should contain noElementsOf published
-        }
+        for {
+          loadState  <- Ref.of[IO, Boolean](false)
+          topicState <- Ref.empty[IO, Seq[(String, String)]]
+          _          <- createCustomTopics(topics)
+          _          <- publishStringMessages(testTopic1, forTopic1)
+          assertion  <- assertPostLoadRecordsConsumed(loadState, topicState)
+        } yield assertion
       }
 
     }
-
-    "Kafka is misbehaving" should {
-
-      "fail if unavailable at startup" in withRunningKafka { _ =>
-        given badConsumerSettings: ConsumerSettings[IO, String, String] = ConsumerSettings[IO, String, String]
-          .withBootstrapServers("localhost:6001")
-          .withAutoOffsetReset(AutoOffsetReset.Earliest)
-          .withGroupId("test-consumer-group")
-          .withRequestTimeout(700.millis)
-          .withSessionTimeout(500.millis)
-          .withHeartbeatInterval(300.millis)
-          .withDefaultApiTimeout(1000.millis)
-
-        runLoader(NonEmptyList.one(testTopic1), LoadAll)
-          .assertThrows[KafkaTimeoutException]
-      }
-
-    }
-  }
-
-  "loadAndRun" should {
-
-    "execute callback when finished loading and keep streaming" in withRunningKafka { implicit kafkaConfig =>
-      val (preLoad, postLoad) = records(1 to 15).splitAt(10)
-
-      def assertPostLoadRecordsConsumed(
-          loadState: Ref[IO, Boolean],
-          topicState: Ref[IO, Seq[(String, String)]]
-      ): IO[Assertion] =
-        loadAndRunR(NonEmptyList.one(testTopic1))(
-          _ => loadState.set(true),
-          r => topicState.getAndUpdate(_ :+ r).void
-        ).surround {
-          for {
-            _         <- eventually(topicState.get.asserting(_ should contain theSameElementsAs preLoad))
-            _         <- eventually(loadState.get.asserting(_ shouldBe true))
-            _         <- publishStringMessages(testTopic1, postLoad)
-            assertion <- eventually(
-                           topicState.get.asserting(_ should contain theSameElementsAs (preLoad ++ postLoad))
-                         )
-          } yield assertion
-        }
-
-      for {
-        loadState  <- Ref.of[IO, Boolean](false)
-        topicState <- Ref.empty[IO, Seq[(String, String)]]
-        _          <- createCustomTopics(NonEmptyList.one(testTopic1))
-        _          <- publishStringMessages(testTopic1, preLoad)
-        assertion  <- assertPostLoadRecordsConsumed(loadState, topicState)
-      } yield assertion
-    }
-
-    "execute callback if the topic is empty and keep streaming" in withRunningKafka { implicit kafkaConfig =>
-      val postLoad = records(1 to 15)
-
-      def assertPostLoadRecordsConsumed(
-          loadState: Ref[IO, Boolean],
-          topicState: Ref[IO, Seq[(String, String)]]
-      ): IO[Assertion] =
-        loadAndRunR(NonEmptyList.one(testTopic1))(
-          _ => loadState.set(true),
-          r => topicState.getAndUpdate(_ :+ r).void
-        ).surround {
-          for {
-            _         <- eventually(loadState.get.asserting(_ shouldBe true))
-            _         <- publishStringMessages(testTopic1, postLoad)
-            assertion <- eventually(
-                           topicState.get.asserting(_ should contain theSameElementsAs postLoad)
-                         )
-          } yield assertion
-        }
-
-      for {
-        loadState  <- Ref.of[IO, Boolean](false)
-        topicState <- Ref.empty[IO, Seq[(String, String)]]
-        _          <- createCustomTopics(NonEmptyList.one(testTopic1))
-        assertion  <- assertPostLoadRecordsConsumed(loadState, topicState)
-      } yield assertion
-    }
-
-    "execute callback if one topic is empty and keep streaming" in withRunningKafka { implicit kafkaConfig =>
-      val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
-      val topics                 = NonEmptyList.of(testTopic1, testTopic2)
-
-      def assertPostLoadRecordsConsumed(
-          loadState: Ref[IO, Boolean],
-          topicState: Ref[IO, Seq[(String, String)]]
-      ): IO[Assertion] =
-        loadAndRunR(topics)(
-          _ => loadState.set(true),
-          r => topicState.getAndUpdate(_ :+ r).void
-        ).surround {
-          for {
-            _         <- eventually(topicState.get.asserting(_ should contain theSameElementsAs forTopic1))
-            _         <- eventually(loadState.get.asserting(_ shouldBe true))
-            _         <- publishStringMessages(testTopic2, forTopic2)
-            assertion <- eventually(
-                           topicState.get.asserting(_ should contain theSameElementsAs (forTopic1 ++ forTopic2))
-                         )
-          } yield assertion
-        }
-
-      for {
-        loadState  <- Ref.of[IO, Boolean](false)
-        topicState <- Ref.empty[IO, Seq[(String, String)]]
-        _          <- createCustomTopics(topics)
-        _          <- publishStringMessages(testTopic1, forTopic1)
-        assertion  <- assertPostLoadRecordsConsumed(loadState, topicState)
-      } yield assertion
-    }
-
-  }
-
 }
