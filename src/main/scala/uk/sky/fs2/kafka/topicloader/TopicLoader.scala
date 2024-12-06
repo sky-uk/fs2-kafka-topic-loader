@@ -226,7 +226,6 @@ trait TopicLoader {
       stream
         .scan(allHighestOffsets)(emitRecordRemovingConsumedPartition[K, V])
         .takeWhile(_.partitionOffsets.nonEmpty, takeFailure = true)
-        .debug()
         .evalTapChunk(_.partitionLastOffset.traverse { last =>
           info"Finished loading data from ${last.topicPartition.show} at offset ${last.offset}"
         })

@@ -2,14 +2,56 @@ package integration
 
 import base.KafkaSpecBase
 import cats.data.NonEmptyList
-import cats.effect.{IO, Ref}
+import cats.effect.{Async, IO, Ref}
 import fs2.kafka.{AutoOffsetReset, ConsumerSettings}
 import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
 import org.scalatest.Assertion
-import uk.sky.fs2.kafka.topicloader.{LoadAll, LoadCommitted}
+import uk.sky.fs2.kafka.topicloader.{LoadAll, LoadCommitted, LoadTopicStrategy}
 import utils.KafkaTestContainer
 
 import scala.concurrent.duration.*
+
+//trait TopicLoaderRunnable[F[_]] {
+//  def load(topics: NonEmptyList[String], strategy: LoadTopicStrategy): F[List[(String, String)]]
+//  def loadAndRun(topics: NonEmptyList[String], strategy: LoadTopicStrategy): F[List[(String, String)]]
+//}
+//
+//object TopicLoaderRunnable {
+//  def apply[F[_] : Async](topics: NonEmptyList[String], strategy: LoadTopicStrategy) = new TopicLoaderRunnable[F] {
+//    override def load(topics: NonEmptyList[String], strategy: LoadTopicStrategy): F[List[(String, String)]]       =
+//
+//    override def loadAndRun(topics: NonEmptyList[String], strategy: LoadTopicStrategy): F[List[(String, String)]] = ???
+//  }
+//}
+
+trait TopicLoaderBehaviours { this: KafkaSpecBase[IO] & KafkaTestContainer[IO] =>
+
+  def topicLoader(
+      runLoader: (NonEmptyList[String], LoadTopicStrategy) => (
+          ConsumerSettings[IO, String, String],
+          Async[IO]
+      ) ?=> IO[List[(String, String)]]
+  ): Unit = {
+    val strategy = LoadAll
+    "stream all records from all topics" in withRunningKafka { implicit kafkaConfig =>
+      val topics                 = NonEmptyList.of(testTopic1, testTopic2)
+      val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
+
+      for {
+        _      <- createCustomTopics(topics)
+        _      <- publishStringMessages(testTopic1, forTopic1)
+        _      <- publishStringMessages(testTopic2, forTopic2)
+        result <- runLoader(topics, strategy)
+      } yield result should contain theSameElementsAs (forTopic1 ++ forTopic2)
+    }
+  }
+}
+
+class AnotherLoaderIntSpec extends KafkaSpecBase[IO], KafkaTestContainer[IO], TopicLoaderBehaviours {
+  "TopicLoader.load" should {
+    behave like topicLoader(runLoader)
+  }
+}
 
 class TopicLoaderIntSpec extends KafkaSpecBase[IO], KafkaTestContainer[IO] {
 
@@ -32,11 +74,11 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO], KafkaTestContainer[IO] {
 
       "stream all records from all topics with chunks" in withRunningKafka { implicit kafkaConfig =>
         val topics                 = NonEmptyList.of(testTopic1, testTopic2)
-        val (forTopic1, forTopic2) = records(1 to 15).splitAt(10)
+        val (forTopic1, forTopic2) = records(1 to 1500).splitAt(10)
 
         for {
           ref    <- Ref.of[IO, List[(String, String)]](List.empty)
-          _      <- createCustomTopics(topics)
+          _      <- createCustomTopics(topics, partitions = 10)
           _      <- publishStringMessages(testTopic1, forTopic1)
           _      <- publishStringMessages(testTopic2, forTopic2)
           _      <- runLoaderChunks(topics, strategy, cr => ref.update(_ :+ recordToTuple(cr)))
