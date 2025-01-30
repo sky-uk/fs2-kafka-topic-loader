@@ -1,6 +1,6 @@
 import Dependencies.*
 
-lazy val scala3                 = "3.3.4"
+lazy val scala3                 = "3.3.5"
 lazy val supportedScalaVersions = List(scala3)
 lazy val scmUrl                 = "https://github.com/sky-uk/fs2-kafka-topic-loader"
 
