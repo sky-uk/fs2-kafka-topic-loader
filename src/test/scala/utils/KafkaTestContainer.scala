@@ -25,10 +25,11 @@ object KafkaContainer {
       for {
         status           <- Ref.of(Status.Starting)
         env              <- Env[F].get("CONFLUENT_KAFKA_VERSION")
-        container        <- Either
-                              .catchNonFatal(
-                                Underlying(DockerImageName.parse(s"confluentinc/cp-kafka:${env.getOrElse("7.4.0")}"))
-                              )
+        container        <- Either.catchNonFatal {
+                              val c = Underlying(DockerImageName.parse(s"confluentinc/cp-kafka:${env.getOrElse("7.4.0")}"))
+                              c.withEnv("KAFKA_AUTO_CREATE_TOPICS_ENABLE", "false")
+                              c
+                            }
                               .liftTo[F]
         _                <- F.blocking(container.start())
         _                <- status.set(Status.Started)
