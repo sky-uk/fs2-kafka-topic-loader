@@ -4,7 +4,7 @@ import base.KafkaSpecBase
 import cats.data.NonEmptyList
 import cats.effect.{IO, Ref}
 import fs2.kafka.{AutoOffsetReset, ConsumerSettings}
-import org.apache.kafka.common.errors.TimeoutException as KafkaTimeoutException
+import org.apache.kafka.common.errors.{TimeoutException as KafkaTimeoutException, UnknownTopicOrPartitionException}
 import org.scalatest.Assertion
 import uk.sky.fs2.kafka.topicloader.{LoadAll, LoadCommitted}
 import utils.KafkaTestContainer
@@ -187,7 +187,13 @@ class TopicLoaderIntSpec extends KafkaSpecBase[IO], KafkaTestContainer[IO] {
           .assertThrows[KafkaTimeoutException]
       }
 
+      "fail if none of the specified topics exist" in withRunningKafka { implicit kafkaConfig =>
+        val nonExistentTopics = NonEmptyList.of("non-existent-topic-1", "non-existent-topic-2")
+
+        runLoader(nonExistentTopics, LoadAll).assertThrows[UnknownTopicOrPartitionException]
+      }
     }
+
   }
 
   "loadAndRun" should {

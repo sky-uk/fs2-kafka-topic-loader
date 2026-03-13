@@ -9,6 +9,7 @@ import fs2.kafka.{ConsumerRecord, ConsumerSettings, KafkaConsumer}
 import fs2.{Pipe, Stream}
 import org.apache.kafka.clients.consumer.OffsetAndMetadata
 import org.apache.kafka.common.TopicPartition
+import org.apache.kafka.common.errors.UnknownTopicOrPartitionException
 import org.typelevel.log4cats.syntax.*
 import org.typelevel.log4cats.{Logger, LoggerFactory}
 
@@ -85,7 +86,8 @@ trait TopicLoader {
     for {
       given Logger[F] <- Stream.eval(LoggerFactory[F].create)
       preloadConsumer <- KafkaConsumer.stream(consumerSettings)
-      logOffsets      <- Stream.eval(logOffsetsForTopics(topics, LoadAll, preloadConsumer)).flatMap(Stream.fromOption(_))
+      logOffsets      <-
+        Stream.eval(logOffsetsForTopics(topics, LoadAll, preloadConsumer)).rethrow
       _               <- Stream.eval(info"log offsets: ${logOffsets.show}")
       record          <- load(logOffsets, preloadConsumer).onFinalizeCase(onLoad) ++ postLoad(logOffsets)
     } yield record
@@ -97,7 +99,7 @@ trait TopicLoader {
       consumer: KafkaConsumer[F, K, V]
   ): Stream[F, ConsumerRecord[K, V]] =
     for {
-      logOffsets <- Stream.eval(logOffsetsForTopics(topics, strategy, consumer)).flatMap(Stream.fromOption(_))
+      logOffsets <- Stream.eval(logOffsetsForTopics(topics, strategy, consumer)).rethrow
       _          <- Stream.eval(info"log offsets: ${logOffsets.show}")
       record     <- load(logOffsets, consumer)
     } yield record
@@ -148,7 +150,7 @@ trait TopicLoader {
       topics: NonEmptyList[String],
       strategy: LoadTopicStrategy,
       consumer: KafkaConsumer[F, K, V]
-  ): F[Option[NonEmptyMap[TopicPartition, LogOffsets]]] =
+  ): F[Either[UnknownTopicOrPartitionException, NonEmptyMap[TopicPartition, LogOffsets]]] =
     for {
       topicPartitions             <- partitionsForTopics(topics, consumer)
       beginningOffsetPerPartition <- consumer.beginningOffsets(topicPartitions)
@@ -159,7 +161,9 @@ trait TopicLoader {
       logOffsets                   = beginningOffsetPerPartition.map { (partition, offset) =>
                                        partition -> LogOffsets(offset, endOffsets(partition))
                                      }
-    } yield NonEmptyMap.fromMap(SortedMap.from(logOffsets))
+    } yield NonEmptyMap
+      .fromMap(SortedMap.from(logOffsets))
+      .toRight(new UnknownTopicOrPartitionException(s"Topics do not exist: ${topics.toList.mkString(", ")}"))
 
   private def earliestOffsets[F[_] : Monad : Logger, K, V](
       consumer: KafkaConsumer[F, K, V],
